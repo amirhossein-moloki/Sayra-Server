@@ -1,0 +1,25 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Sayra.Backend.Api/Sayra.Backend.Api.csproj" />
+    <Project Path="src/Sayra.Backend.Application/Sayra.Backend.Application.csproj" />
+    <Project Path="src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj" />
+    <Project Path="src/Sayra.Backend.Infrastructure/Sayra.Backend.Infrastructure.csproj" />
+    <Project Path="src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj" />
+  </Folder>
+  <Folder Name="/src/Sayra.Backend.Modules/">
+    <Project Path="src/Sayra.Backend.Modules/Authentication/Authentication.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Commands/Commands.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Configuration/Configuration.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Events/Events.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Fleet/Fleet.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Sessions/Sessions.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Telemetry/Telemetry.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Updates/Updates.csproj" />
+    <Project Path="src/Sayra.Backend.Modules/Workstations/Workstations.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sayra.Backend.ArchitectureTests/Sayra.Backend.ArchitectureTests.csproj" />
+    <Project Path="tests/Sayra.Backend.IntegrationTests/Sayra.Backend.IntegrationTests.csproj" />
+    <Project Path="tests/Sayra.Backend.UnitTests/Sayra.Backend.UnitTests.csproj" />
+  </Folder>
+</Solution>

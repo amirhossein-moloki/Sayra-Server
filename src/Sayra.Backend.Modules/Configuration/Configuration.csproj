@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Sayra.Backend.Application\Sayra.Backend.Application.csproj" />
+    <ProjectReference Include="..\..\Sayra.Backend.Domain\Sayra.Backend.Domain.csproj" />
+    <ProjectReference Include="..\..\Sayra.Backend.Shared\Sayra.Backend.Shared.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

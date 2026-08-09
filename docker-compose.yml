@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  sayra-postgres:
+    image: postgres:15-alpine
+    container_name: sayra-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sayra_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sayra_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sayra-redis:
+    image: redis:7-alpine
+    container_name: sayra-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sayra-backend:
+    image: sayra-backend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sayra-backend
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Database__ConnectionString=Host=sayra-postgres;Database=sayra_db;Username=postgres;Password=postgres
+      - Redis__ConnectionString=sayra-redis:6379
+      - Server__Port=5000
+    depends_on:
+      sayra-postgres:
+        condition: service_healthy
+      sayra-redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

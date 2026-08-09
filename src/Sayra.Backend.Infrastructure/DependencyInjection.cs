@@ -1,0 +1,98 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using StackExchange.Redis;
+using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
+using Sayra.Backend.Infrastructure.Caching;
+using Sayra.Backend.Infrastructure.Configuration.Options;
+using Sayra.Backend.Infrastructure.Diagnostics;
+using Sayra.Backend.Infrastructure.Logging;
+using Sayra.Backend.Infrastructure.Persistence;
+using Sayra.Backend.Infrastructure.Security;
+
+namespace Sayra.Backend.Infrastructure
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+        {
+            // 1. Register Strongly-Typed Options Sections
+            services.Configure<DatabaseOptions>(configuration.GetSection(DatabaseOptions.SectionName));
+            services.Configure<RedisOptions>(configuration.GetSection(RedisOptions.SectionName));
+            services.Configure<ServerOptions>(configuration.GetSection(ServerOptions.SectionName));
+            services.Configure<DiscoveryOptions>(configuration.GetSection(DiscoveryOptions.SectionName));
+            services.Configure<SecurityOptions>(configuration.GetSection(SecurityOptions.SectionName));
+            services.Configure<TlsOptions>(configuration.GetSection(TlsOptions.SectionName));
+            services.Configure<LoggingOptions>(configuration.GetSection(LoggingOptions.SectionName));
+            services.Configure<UpdatesOptions>(configuration.GetSection(UpdatesOptions.SectionName));
+            services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+
+            // 2. Database Foundation Setup
+            var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
+            var dbConnectionString = dbOptions.ConnectionString;
+
+            // If empty (e.g. testing or bootstrapping), fallback to an in-memory/dummy or let it be configured
+            if (string.IsNullOrEmpty(dbConnectionString))
+            {
+                // Set default development connection string for PostgreSQL
+                dbConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=postgres";
+            }
+
+            services.AddDbContext<ApplicationDbContext>(options =>
+            {
+                options.UseNpgsql(dbConnectionString, npgsqlOptions =>
+                {
+                    npgsqlOptions.EnableRetryOnFailure(3);
+                });
+            });
+
+            // Register database abstractions
+            services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<ApplicationDbContext>());
+            services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+
+            // 3. Redis Foundation Setup
+            var redisOptions = configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>() ?? new RedisOptions();
+            var redisConnectionString = redisOptions.ConnectionString;
+            if (string.IsNullOrEmpty(redisConnectionString))
+            {
+                redisConnectionString = "localhost:6379";
+            }
+
+            try
+            {
+                var redisConfig = ConfigurationOptions.Parse(redisConnectionString);
+                redisConfig.AbortOnConnectFail = false; // Prevents crash on startup if offline
+
+                services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConfig));
+                services.AddSingleton<IRedisService, RedisService>();
+            }
+            catch
+            {
+                // Setup safe fallback or log
+                var lazyMultiplexer = new Lazy<IConnectionMultiplexer>(() =>
+                    ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = { "localhost:6379" }, AbortOnConnectFail = false }));
+                services.AddSingleton<IConnectionMultiplexer>(_ => lazyMultiplexer.Value);
+                services.AddSingleton<IRedisService, RedisService>();
+            }
+
+            // 4. Security & Cryptographic abstractions
+            services.AddSingleton<ICryptographicService, CryptographicService>();
+
+            // 5. Health Checks
+            services.AddHealthChecks()
+                .AddDbContextCheck<ApplicationDbContext>(
+                    name: "PostgreSQL",
+                    failureStatus: HealthStatus.Unhealthy,
+                    tags: new[] { "ready" })
+                .AddCheck<RedisHealthCheck>(
+                    name: "Redis",
+                    failureStatus: HealthStatus.Unhealthy,
+                    tags: new[] { "ready" });
+
+            return services;
+        }
+    }
+}

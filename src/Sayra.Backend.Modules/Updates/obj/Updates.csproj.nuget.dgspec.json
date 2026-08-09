@@ -1,0 +1,275 @@
+{
+  "format": 1,
+  "restore": {
+    "/app/src/Sayra.Backend.Modules/Updates/Updates.csproj": {}
+  },
+  "projects": {
+    "/app/src/Sayra.Backend.Application/Sayra.Backend.Application.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/app/src/Sayra.Backend.Application/Sayra.Backend.Application.csproj",
+        "projectName": "Sayra.Backend.Application",
+        "projectPath": "/app/src/Sayra.Backend.Application/Sayra.Backend.Application.csproj",
+        "packagesPath": "/home/jules/.nuget/packages/",
+        "outputPath": "/app/src/Sayra.Backend.Application/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/jules/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "/usr/lib/dotnet/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj"
+              },
+              "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "FluentValidation": {
+              "target": "Package",
+              "version": "[12.1.1, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.103/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj",
+        "projectName": "Sayra.Backend.Domain",
+        "projectPath": "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj",
+        "packagesPath": "/home/jules/.nuget/packages/",
+        "outputPath": "/app/src/Sayra.Backend.Domain/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/jules/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "/usr/lib/dotnet/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.103/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/app/src/Sayra.Backend.Modules/Updates/Updates.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/app/src/Sayra.Backend.Modules/Updates/Updates.csproj",
+        "projectName": "Updates",
+        "projectPath": "/app/src/Sayra.Backend.Modules/Updates/Updates.csproj",
+        "packagesPath": "/home/jules/.nuget/packages/",
+        "outputPath": "/app/src/Sayra.Backend.Modules/Updates/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/jules/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "/usr/lib/dotnet/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "/app/src/Sayra.Backend.Application/Sayra.Backend.Application.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Application/Sayra.Backend.Application.csproj"
+              },
+              "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj"
+              },
+              "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj": {
+                "projectPath": "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.103/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj",
+        "projectName": "Sayra.Backend.Shared",
+        "projectPath": "/app/src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj",
+        "packagesPath": "/home/jules/.nuget/packages/",
+        "outputPath": "/app/src/Sayra.Backend.Shared/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/jules/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "/usr/lib/dotnet/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.103/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

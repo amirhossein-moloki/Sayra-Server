@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "ztri7E31LIE=",
+  "success": true,
+  "projectFilePath": "/app/src/Sayra.Backend.Modules/Authentication/Authentication.csproj",
+  "expectedPackageFiles": [
+    "/home/jules/.nuget/packages/fluentvalidation/12.1.1/fluentvalidation.12.1.1.nupkg.sha512"
+  ],
+  "logs": []
+}

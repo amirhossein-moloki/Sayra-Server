@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "9sFFN99uHa8=",
+  "success": true,
+  "projectFilePath": "/app/src/Sayra.Backend.Modules/Workstations/Workstations.csproj",
+  "expectedPackageFiles": [
+    "/home/jules/.nuget/packages/fluentvalidation/12.1.1/fluentvalidation.12.1.1.nupkg.sha512"
+  ],
+  "logs": []
+}
