@@ -61,7 +61,10 @@ namespace Sayra.Backend.Infrastructure
             var redisConnectionString = redisOptions.ConnectionString;
             if (string.IsNullOrEmpty(redisConnectionString))
             {
-                redisConnectionString = "localhost:6379";
+                throw new System.InvalidOperationException(
+                    "Critical Redis connection string is missing or empty. " +
+                    "Please configure 'Redis:ConnectionString' via environment variables, " +
+                    "local secrets, or configuration files.");
             }
 
             try
@@ -74,9 +77,9 @@ namespace Sayra.Backend.Infrastructure
             }
             catch
             {
-                // Setup safe fallback or log
+                // Setup safe fallback or log using the configured connection string
                 var lazyMultiplexer = new Lazy<IConnectionMultiplexer>(() =>
-                    ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = { "localhost:6379" }, AbortOnConnectFail = false }));
+                    ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = { redisConnectionString }, AbortOnConnectFail = false }));
                 services.AddSingleton<IConnectionMultiplexer>(_ => lazyMultiplexer.Value);
                 services.AddSingleton<IRedisService, RedisService>();
             }

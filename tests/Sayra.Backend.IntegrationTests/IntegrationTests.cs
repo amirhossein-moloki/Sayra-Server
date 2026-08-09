@@ -19,6 +19,7 @@ namespace Sayra.Backend.IntegrationTests
 
         public IntegrationTests(WebApplicationFactory<Program> factory)
         {
+            EnvLoader.Load();
             _factory = factory;
             _client = _factory.CreateClient();
         }
