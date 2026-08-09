@@ -26,6 +26,12 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public ConnectionLifecycleState State => _state;
 
+        public byte[]? SessionKey { get; set; }
+        public string? PcId { get; set; }
+        public string? Hostname { get; set; }
+        public string? SiteId { get; set; }
+        public string? ClientVersion { get; set; }
+
         public Stream GetStream()
         {
             if (_disposed)

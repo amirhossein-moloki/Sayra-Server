@@ -86,6 +86,7 @@ namespace Sayra.Backend.Infrastructure
 
             // 4. Security & Cryptographic abstractions
             services.AddSingleton<ICryptographicService, CryptographicService>();
+            services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
 
             // 5. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
