@@ -44,11 +44,7 @@ namespace Sayra.Backend.Api
                     options.Limits.MaxConcurrentUpgradedConnections = 1000;
                 });
 
-                // If connection string is empty, provide safe defaults *only* if not running under Production environment to allow testing and bootstrapping
-                if (string.IsNullOrEmpty(builder.Configuration["Database:ConnectionString"]) && !builder.Environment.IsProduction())
-                {
-                    builder.Configuration["Database:ConnectionString"] = "Host=localhost;Database=sayra_db_dev;Username=postgres;Password=" + "postgres";
-                }
+                // If connection string or redis is empty, provide safe local defaults (excluding credentials) *only* if not running under Production environment
                 if (string.IsNullOrEmpty(builder.Configuration["Redis:ConnectionString"]) && !builder.Environment.IsProduction())
                 {
                     builder.Configuration["Redis:ConnectionString"] = "localhost:6379";
