@@ -1,11 +1,15 @@
 using System;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Sayra.Backend.Api.Middleware;
 using Sayra.Backend.Infrastructure;
+using Sayra.Backend.Infrastructure.Configuration;
+using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Infrastructure.Logging;
 
 namespace Sayra.Backend.Api
@@ -30,6 +34,34 @@ namespace Sayra.Backend.Api
                     SerilogConfiguration.ConfigureLogging(context, configuration);
                 });
 
+                // Configure Kestrel limits
+                builder.WebHost.ConfigureKestrel(options =>
+                {
+                    options.Limits.MaxRequestBodySize = 52428800; // 50MB
+                    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
+                    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+                    options.Limits.MaxConcurrentConnections = 1000;
+                    options.Limits.MaxConcurrentUpgradedConnections = 1000;
+                });
+
+                // If connection string is empty, provide safe defaults *only* if not running under Production environment to allow testing and bootstrapping
+                if (string.IsNullOrEmpty(builder.Configuration["Database:ConnectionString"]) && !builder.Environment.IsProduction())
+                {
+                    builder.Configuration["Database:ConnectionString"] = "Host=localhost;Database=sayra_db_dev;Username=postgres;Password=postgres";
+                }
+                if (string.IsNullOrEmpty(builder.Configuration["Redis:ConnectionString"]) && !builder.Environment.IsProduction())
+                {
+                    builder.Configuration["Redis:ConnectionString"] = "localhost:6379";
+                }
+
+                // Validate critical configuration on startup (Fail-Fast)
+                var dbOptions = builder.Configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
+                var redisOptions = builder.Configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>() ?? new RedisOptions();
+                var serverOptions = builder.Configuration.GetSection(ServerOptions.SectionName).Get<ServerOptions>() ?? new ServerOptions();
+                var discoveryOptions = builder.Configuration.GetSection(DiscoveryOptions.SectionName).Get<DiscoveryOptions>() ?? new DiscoveryOptions();
+
+                ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions);
+
                 // Add Infrastructure dependencies
                 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -47,6 +79,17 @@ namespace Sayra.Backend.Api
 
                 var app = builder.Build();
 
+                // Secure Headers Middleware
+                app.Use(async (context, next) =>
+                {
+                    context.Response.Headers["X-Frame-Options"] = "DENY";
+                    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+                    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+                    context.Response.Headers["Content-Security-Policy"] = "default-src 'self'";
+                    await next();
+                });
+
                 // Global Exception Handling Middleware (first in pipeline)
                 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
@@ -59,7 +102,7 @@ namespace Sayra.Backend.Api
 
                 app.UseRouting();
 
-                // Authentication and Authorization (empty place holders for stage 03+)
+                // Authentication and Authorization (empty placeholders for stage 03+)
                 app.UseAuthorization();
 
                 // Map Controllers (including Health endpoints)

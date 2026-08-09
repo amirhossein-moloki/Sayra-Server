@@ -6,7 +6,9 @@ using StackExchange.Redis;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
+using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Infrastructure.Caching;
+using Sayra.Backend.Infrastructure.Transport;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Infrastructure.Diagnostics;
 using Sayra.Backend.Infrastructure.Logging;
@@ -81,7 +83,18 @@ namespace Sayra.Backend.Infrastructure
             // 4. Security & Cryptographic abstractions
             services.AddSingleton<ICryptographicService, CryptographicService>();
 
-            // 5. Health Checks
+            // 5. TCP & UDP Transport Services
+            services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
+
+            services.AddSingleton<TcpServer>();
+            services.AddSingleton<ITcpServer>(provider => provider.GetRequiredService<TcpServer>());
+            services.AddHostedService(provider => provider.GetRequiredService<TcpServer>());
+
+            services.AddSingleton<UdpDiscoveryServer>();
+            services.AddSingleton<IUdpDiscoveryServer>(provider => provider.GetRequiredService<UdpDiscoveryServer>());
+            services.AddHostedService(provider => provider.GetRequiredService<UdpDiscoveryServer>());
+
+            // 6. Health Checks
             services.AddHealthChecks()
                 .AddDbContextCheck<ApplicationDbContext>(
                     name: "PostgreSQL",
