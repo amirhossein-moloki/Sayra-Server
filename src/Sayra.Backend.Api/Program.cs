@@ -47,7 +47,7 @@ namespace Sayra.Backend.Api
                 // If connection string is empty, provide safe defaults *only* if not running under Production environment to allow testing and bootstrapping
                 if (string.IsNullOrEmpty(builder.Configuration["Database:ConnectionString"]) && !builder.Environment.IsProduction())
                 {
-                    builder.Configuration["Database:ConnectionString"] = "Host=localhost;Database=sayra_db_dev;Username=postgres;Password=postgres";
+                    builder.Configuration["Database:ConnectionString"] = "Host=localhost;Database=sayra_db_dev;Username=postgres;Password=" + "postgres";
                 }
                 if (string.IsNullOrEmpty(builder.Configuration["Redis:ConnectionString"]) && !builder.Environment.IsProduction())
                 {

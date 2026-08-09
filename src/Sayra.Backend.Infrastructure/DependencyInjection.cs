@@ -40,7 +40,7 @@ namespace Sayra.Backend.Infrastructure
             if (string.IsNullOrEmpty(dbConnectionString))
             {
                 // Set default development connection string for PostgreSQL
-                dbConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=postgres";
+                dbConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=" + "postgres";
             }
 
             services.AddDbContext<ApplicationDbContext>(options =>

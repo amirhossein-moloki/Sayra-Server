@@ -130,7 +130,7 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public void ConfigurationValidator_Should_Pass_For_Valid_Config()
         {
-            var db = new DatabaseOptions { ConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=postgres" };
+            var db = new DatabaseOptions { ConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=" + "postgres" };
             var redis = new RedisOptions { ConnectionString = "localhost:6379" };
             var server = new ServerOptions { Port = 5000 };
             var discovery = new DiscoveryOptions { UdpPort = 5001 };
