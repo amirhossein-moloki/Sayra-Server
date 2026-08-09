@@ -36,11 +36,12 @@ namespace Sayra.Backend.Infrastructure
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
             var dbConnectionString = dbOptions.ConnectionString;
 
-            // If empty (e.g. testing or bootstrapping), fallback to an in-memory/dummy or let it be configured
-            if (string.IsNullOrEmpty(dbConnectionString))
+            if (string.IsNullOrWhiteSpace(dbConnectionString))
             {
-                // Set default development connection string for PostgreSQL
-                dbConnectionString = "Host=localhost;Database=sayra_db;Username=postgres;Password=" + "postgres";
+                throw new System.InvalidOperationException(
+                    "Critical database connection string is missing or empty. " +
+                    "Please configure 'Database:ConnectionString' via environment variables, " +
+                    "local secrets, or configuration files.");
             }
 
             services.AddDbContext<ApplicationDbContext>(options =>
