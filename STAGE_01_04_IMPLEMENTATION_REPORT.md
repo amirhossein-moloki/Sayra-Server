@@ -8,9 +8,61 @@ Every component is highly configurable, resilient to transport-level error scena
 
 ---
 
+## ENVIRONMENT-BASED CONFIGURATION & SECRET MANAGEMENT POLICY
+
+To enforce industry-standard security and GitGuardian-friendliness, all infrastructure secrets, sensitive credentials, master keys, and environments are decoupled from the source code and configuration files.
+
+### 1. Secret-Management Rules
+* **No Hardcoded Secrets**: No passwords, API keys, cryptographic keys, master keys, or connection strings containing credentials may exist in any C# code or committed JSON configuration files (such as `appsettings.json` or `appsettings.Development.json`).
+* **Environment Variables as Authoritative Source**: Standard environment variables are the single source of truth for all environment-specific and sensitive infrastructure settings.
+* **Never Commit Secrets**: Local `.env` files contain active development secrets and are strictly ignored via `.gitignore` to prevent any possibility of accidental leakage to public/private repositories.
+
+---
+
+## LOCAL DEVELOPMENT & TESTING WORKFLOW (.env)
+
+A native project-level `.env` load strategy has been introduced using a custom lightweight, robust `EnvLoader` parser, which recursively finds and applies configuration on application and test suite startup.
+
+### 1. Required Environment Variables
+
+| Variable Name | Purpose / Target Setting | Description / Formatting |
+| :--- | :--- | :--- |
+| `Database__ConnectionString` | `Database:ConnectionString` | Fully qualified PostgreSQL connection string (e.g., `Host=127.0.0.1;Port=5432;Database=sayra_db_dev;Username=postgres;Password=postgres`) |
+| `Redis__ConnectionString` | `Redis:ConnectionString` | Connection endpoint for Redis cluster (e.g., `127.0.0.1:6379`) |
+| `Security__TokenSigningKey` | `Security:TokenSigningKey` | High-entropy master security token key (HMAC-SHA256, minimum 32 bytes) |
+| `SAYRA_MASTER_KEY` | Equivalent to TokenSigningKey | System-wide master encryption key |
+| `Tls__CertificatePath` | `Tls:CertificatePath` | Path to TLS PFX certificate file (where applicable) |
+| `Tls__CertificatePassword` | `Tls:CertificatePassword` | Password used to secure the TLS PFX certificate file |
+| `Server__Port` | `Server:Port` | Web API and persistent TCP connection port (default `5000`) |
+| `Discovery__UdpPort` | `Discovery:UdpPort` | UDP Discovery broadcast socket port (default `37020`) |
+
+### 2. Local-Development Setup Steps
+1. **Copy the Template**: Copy the safe `.env.example` file located at the repository root to create your local `.env` file:
+   ```bash
+   cp .env.example .env
+   ```
+2. **Populate Settings**: Open `.env` and fill in your local infrastructure credentials (such as your PostgreSQL username/password, Redis port, and custom keys).
+3. **Run Services**: Launch local development databases and Redis using Docker Compose:
+   ```bash
+   docker compose up -d
+   ```
+4. **Compile and Run**: Run the application or test suite. `EnvLoader` will automatically load your `.env` settings into standard .NET environment configuration:
+   ```bash
+   dotnet run --project src/Sayra.Backend.Api
+   # or
+   dotnet test
+   ```
+
+### 3. `.env.example` Guidelines
+The `.env.example` file is tracked in Git and serves as a blueprint of all required configuration parameters. It must **NEVER** contain real passwords, active secrets, real RSA private keys, or production credentials. It uses exclusively generic placeholder values.
+
+---
+
 ## PROJECTS & FILES CHANGED
 
 The following files have been added or updated in the modular monolith structure:
+* `src/Sayra.Backend.Api/EnvLoader.cs` (Added - recursively resolves and parses `.env` files into environment context)
+* `.env.example` (Added - template containing required configuration keys and safe placeholders)
 * `src/Sayra.Backend.Application/Abstractions/Transport/ConnectionLifecycleState.cs` (Added)
 * `src/Sayra.Backend.Application/Abstractions/Transport/ITcpConnection.cs` (Added)
 * `src/Sayra.Backend.Application/Abstractions/Transport/ITcpConnectionRegistry.cs` (Added)
@@ -21,9 +73,11 @@ The following files have been added or updated in the modular monolith structure
 * `src/Sayra.Backend.Infrastructure/Transport/TcpConnectionRegistry.cs` (Added)
 * `src/Sayra.Backend.Infrastructure/Transport/TcpServer.cs` (Added)
 * `src/Sayra.Backend.Infrastructure/Transport/UdpDiscoveryServer.cs` (Added)
-* `src/Sayra.Backend.Infrastructure/DependencyInjection.cs` (Modified)
-* `src/Sayra.Backend.Api/Program.cs` (Modified)
-* `tests/Sayra.Backend.IntegrationTests/TransportAndPipelineTests.cs` (Added)
+* `src/Sayra.Backend.Infrastructure/DependencyInjection.cs` (Modified - removed localhost hardcoded fallback, supports clean exception throwing on missing variables)
+* `src/Sayra.Backend.Api/Program.cs` (Modified - integrates `.env` loader and cleans startup fallbacks)
+* `tests/Sayra.Backend.IntegrationTests/TransportAndPipelineTests.cs` (Modified - loads `.env` and replaces mock credentials with clean placeholders)
+* `tests/Sayra.Backend.IntegrationTests/IntegrationTests.cs` (Modified - integrates `.env` loading context)
+* `tests/Sayra.Backend.IntegrationTests/PersistenceAndInfrastructureTests.cs` (Modified - integrates `.env` loading context)
 
 ---
 

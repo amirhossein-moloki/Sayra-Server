@@ -29,6 +29,7 @@ namespace Sayra.Backend.IntegrationTests
 
         public TransportAndPipelineTests(WebApplicationFactory<Program> factory)
         {
+            EnvLoader.Load();
             _factory = factory;
         }
 
@@ -130,8 +131,8 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public void ConfigurationValidator_Should_Pass_For_Valid_Config()
         {
-            var db = new DatabaseOptions { ConnectionString = "Host=localhost;Database=sayra_db;Username=postgres" };
-            var redis = new RedisOptions { ConnectionString = "localhost:6379" };
+            var db = new DatabaseOptions { ConnectionString = "Host=mock_host;Database=mock_db" };
+            var redis = new RedisOptions { ConnectionString = "mock_redis:6379" };
             var server = new ServerOptions { Port = 5000 };
             var discovery = new DiscoveryOptions { UdpPort = 5001 };
 
@@ -143,7 +144,7 @@ namespace Sayra.Backend.IntegrationTests
         public void ConfigurationValidator_Should_Fail_Fast_For_Missing_Database_Config()
         {
             var db = new DatabaseOptions { ConnectionString = "" };
-            var redis = new RedisOptions { ConnectionString = "localhost:6379" };
+            var redis = new RedisOptions { ConnectionString = "mock_redis:6379" };
             var server = new ServerOptions { Port = 5000 };
             var discovery = new DiscoveryOptions { UdpPort = 5001 };
 
@@ -156,7 +157,7 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public void ConfigurationValidator_Should_Fail_Fast_For_Missing_Redis_Config()
         {
-            var db = new DatabaseOptions { ConnectionString = "Host=localhost;Database=sayra_db" };
+            var db = new DatabaseOptions { ConnectionString = "Host=mock_host;Database=mock_db" };
             var redis = new RedisOptions { ConnectionString = "" };
             var server = new ServerOptions { Port = 5000 };
             var discovery = new DiscoveryOptions { UdpPort = 5001 };
@@ -170,8 +171,8 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public void ConfigurationValidator_Should_Fail_Fast_For_Invalid_Server_Port()
         {
-            var db = new DatabaseOptions { ConnectionString = "Host=localhost" };
-            var redis = new RedisOptions { ConnectionString = "localhost" };
+            var db = new DatabaseOptions { ConnectionString = "Host=mock_host" };
+            var redis = new RedisOptions { ConnectionString = "mock_redis" };
             var server = new ServerOptions { Port = 99999 }; // Out of range
             var discovery = new DiscoveryOptions { UdpPort = 5001 };
 
@@ -184,8 +185,8 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public void ConfigurationValidator_Should_Fail_Fast_For_Invalid_Discovery_Port()
         {
-            var db = new DatabaseOptions { ConnectionString = "Host=localhost" };
-            var redis = new RedisOptions { ConnectionString = "localhost" };
+            var db = new DatabaseOptions { ConnectionString = "Host=mock_host" };
+            var redis = new RedisOptions { ConnectionString = "mock_redis" };
             var server = new ServerOptions { Port = 5000 };
             var discovery = new DiscoveryOptions { UdpPort = 0 }; // Out of range
 

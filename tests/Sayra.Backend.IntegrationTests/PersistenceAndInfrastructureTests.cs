@@ -20,6 +20,7 @@ namespace Sayra.Backend.IntegrationTests
 
         public PersistenceAndInfrastructureTests(WebApplicationFactory<Program> factory)
         {
+            EnvLoader.Load();
             _factory = factory;
         }
 

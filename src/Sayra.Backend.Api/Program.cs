@@ -18,6 +18,8 @@ namespace Sayra.Backend.Api
     {
         public static int Main(string[] args)
         {
+            EnvLoader.Load();
+
             Log.Logger = new LoggerConfiguration()
                 .WriteTo.Console()
                 .CreateBootstrapLogger();
@@ -43,12 +45,6 @@ namespace Sayra.Backend.Api
                     options.Limits.MaxConcurrentConnections = 1000;
                     options.Limits.MaxConcurrentUpgradedConnections = 1000;
                 });
-
-                // If connection string or redis is empty, provide safe local defaults (excluding credentials) *only* if not running under Production environment
-                if (string.IsNullOrEmpty(builder.Configuration["Redis:ConnectionString"]) && !builder.Environment.IsProduction())
-                {
-                    builder.Configuration["Redis:ConnectionString"] = "localhost:6379";
-                }
 
                 // Validate critical configuration on startup (Fail-Fast)
                 var dbOptions = builder.Configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
