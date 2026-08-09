@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.24" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.*" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sayra.Backend.Infrastructure\Sayra.Backend.Infrastructure.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Application\Sayra.Backend.Application.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Domain\Sayra.Backend.Domain.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Shared\Sayra.Backend.Shared.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Workstations\Workstations.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Sessions\Sessions.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Authentication\Authentication.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Configuration\Configuration.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Updates\Updates.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Telemetry\Telemetry.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Events\Events.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Commands\Commands.csproj" />
+    <ProjectReference Include="..\Sayra.Backend.Modules\Fleet\Fleet.csproj" />
+  </ItemGroup>
+
+</Project>

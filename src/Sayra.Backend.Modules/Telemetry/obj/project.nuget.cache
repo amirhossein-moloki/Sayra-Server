@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "ZmwCT5VuYWs=",
+  "success": true,
+  "projectFilePath": "/app/src/Sayra.Backend.Modules/Telemetry/Telemetry.csproj",
+  "expectedPackageFiles": [
+    "/home/jules/.nuget/packages/fluentvalidation/12.1.1/fluentvalidation.12.1.1.nupkg.sha512"
+  ],
+  "logs": []
+}
