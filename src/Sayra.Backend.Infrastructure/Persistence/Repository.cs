@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -19,19 +20,28 @@ namespace Sayra.Backend.Infrastructure.Persistence
             _dbSet = _context.Set<T>();
         }
 
-        public virtual async Task<T> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        public virtual async Task<T?> GetByIdAsync(Guid id, bool track = true, CancellationToken cancellationToken = default)
         {
-            var entity = await _dbSet.FindAsync(new object[] { id }, cancellationToken);
-            if (entity == null)
+            if (track)
             {
-                throw new KeyNotFoundException($"Entity of type {typeof(T).Name} with ID {id} was not found.");
+                return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
             }
-            return entity;
+            else
+            {
+                return await _dbSet.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+            }
         }
 
-        public virtual async Task<IReadOnlyList<T>> GetAllAsync(CancellationToken cancellationToken = default)
+        public virtual async Task<IReadOnlyList<T>> GetAllAsync(bool track = true, CancellationToken cancellationToken = default)
         {
-            return await _dbSet.ToListAsync(cancellationToken);
+            if (track)
+            {
+                return await _dbSet.ToListAsync(cancellationToken);
+            }
+            else
+            {
+                return await _dbSet.AsNoTracking().ToListAsync(cancellationToken);
+            }
         }
 
         public virtual async Task AddAsync(T entity, CancellationToken cancellationToken = default)
