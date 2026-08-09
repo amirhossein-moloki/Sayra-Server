@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Domain;
 
 namespace Sayra.Backend.Infrastructure.Persistence
 {
@@ -14,6 +15,13 @@ namespace Sayra.Backend.Infrastructure.Persistence
             : base(options)
         {
         }
+
+        public DbSet<Workstation> Workstations { get; set; } = null!;
+        public DbSet<WorkstationSession> WorkstationSessions { get; set; } = null!;
+        public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
+        public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
+        public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
+        public DbSet<SystemUpdate> SystemUpdates { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
