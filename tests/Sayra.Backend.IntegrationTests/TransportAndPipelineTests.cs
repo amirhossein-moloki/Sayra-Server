@@ -15,9 +15,12 @@ using Xunit;
 using Sayra.Backend.Api;
 using Sayra.Backend.Api.Middleware;
 using Sayra.Backend.Api.Models;
+using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Configuration;
+using Sayra.Backend.Infrastructure.Security;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Infrastructure.Transport;
 
@@ -200,6 +203,25 @@ namespace Sayra.Backend.IntegrationTests
 
         #region TCP Transport Foundation Tests
 
+        public class MockTcpAuthenticationService : ITcpAuthenticationService
+        {
+            public Task<bool> AuthenticateAsync(ITcpConnection connection, CancellationToken cancellationToken)
+            {
+                connection.UpdateState(ConnectionLifecycleState.Active);
+                return Task.FromResult(true);
+            }
+        }
+
+        public class MockRedisService : IRedisService
+        {
+            public Task<string?> GetStringAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
+            public Task SetStringAsync(string key, string value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) => Task.CompletedTask;
+            public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class => Task.FromResult<T?>(null);
+            public Task SetAsync<T>(string key, T value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) where T : class => Task.CompletedTask;
+            public Task<bool> RemoveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(true);
+            public Task<bool> PingAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        }
+
         [Fact]
         public async Task TcpServer_Should_Accept_And_Track_Connections_And_Shutdown_Cleanly()
         {
@@ -210,7 +232,11 @@ namespace Sayra.Backend.IntegrationTests
             var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
             var serverLogger = loggerFactory.CreateLogger<TcpServer>();
 
-            using var server = new TcpServer(registry, serverOpts, tlsOpts, serverLogger);
+            var mockAuthService = new MockTcpAuthenticationService();
+            var mockCryptoService = new CryptographicService();
+            var mockRedisService = new MockRedisService();
+
+            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, serverOpts, tlsOpts, serverLogger);
 
             // Start Server
             await server.StartAsync(CancellationToken.None);
@@ -259,7 +285,11 @@ namespace Sayra.Backend.IntegrationTests
             var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
             var serverLogger = loggerFactory.CreateLogger<TcpServer>();
 
-            using var server = new TcpServer(registry, serverOpts, tlsOpts, serverLogger);
+            var mockAuthService = new MockTcpAuthenticationService();
+            var mockCryptoService = new CryptographicService();
+            var mockRedisService = new MockRedisService();
+
+            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, serverOpts, tlsOpts, serverLogger);
 
             await server.StartAsync(CancellationToken.None);
 
