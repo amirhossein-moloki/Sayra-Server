@@ -32,8 +32,11 @@ namespace Sayra.Backend.IntegrationTests
 
             var workstation = new Workstation
             {
+                PcId = $"PC-UNIT-{Guid.NewGuid():N}",
                 Name = "PC-UNIT-01",
-                IpAddress = $"192.168.1.{Random.Shared.Next(2, 254)}",
+                SiteId = "SITE-ALPHA",
+                Hostname = "DESKTOP-UNIT-01",
+                IpAddress = "192.168.1.1",
                 MacAddress = $"00:1A:2B:3C:4D:{Random.Shared.Next(10, 99)}",
                 Status = "Online",
                 LastSeen = DateTime.UtcNow
@@ -131,8 +134,11 @@ namespace Sayra.Backend.IntegrationTests
 
             var workstation = new Workstation
             {
+                PcId = $"PC-TX-{Guid.NewGuid():N}",
                 Name = "PC-TX-TEST",
-                IpAddress = $"10.0.0.{Random.Shared.Next(2, 254)}",
+                SiteId = "SITE-BETA",
+                Hostname = "DESKTOP-TX-01",
+                IpAddress = "10.0.0.1",
                 MacAddress = $"AA:BB:CC:DD:EE:{Random.Shared.Next(10, 99)}",
                 Status = "Offline",
                 LastSeen = DateTime.UtcNow
