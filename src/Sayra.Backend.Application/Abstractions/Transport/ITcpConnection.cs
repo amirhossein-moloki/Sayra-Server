@@ -14,6 +14,8 @@ namespace Sayra.Backend.Application.Abstractions.Transport
         string? Hostname { get; set; }
         string? SiteId { get; set; }
         string? ClientVersion { get; set; }
+        IMessageFrameReader Reader { get; }
+        IMessageFrameWriter Writer { get; }
         Stream GetStream();
         void UpdateState(ConnectionLifecycleState newState);
         Task DisconnectAsync(CancellationToken cancellationToken);
