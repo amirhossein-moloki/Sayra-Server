@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Sayra.Backend.Api/Sayra.Backend.Api.csproj" />
     <Project Path="src/Sayra.Backend.Application/Sayra.Backend.Application.csproj" />
+    <Project Path="src/Sayra.Backend.Contracts/Sayra.Backend.Contracts.csproj" />
     <Project Path="src/Sayra.Backend.Domain/Sayra.Backend.Domain.csproj" />
     <Project Path="src/Sayra.Backend.Infrastructure/Sayra.Backend.Infrastructure.csproj" />
     <Project Path="src/Sayra.Backend.Shared/Sayra.Backend.Shared.csproj" />
