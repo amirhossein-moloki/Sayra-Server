@@ -7,6 +7,9 @@ using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Caching;
 using Sayra.Backend.Infrastructure.Transport;
 using Sayra.Backend.Infrastructure.Configuration.Options;
@@ -53,6 +56,7 @@ namespace Sayra.Backend.Infrastructure
             });
 
             // Register database abstractions
+            services.AddScoped<DbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
             services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<ApplicationDbContext>());
             services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
@@ -88,7 +92,14 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ICryptographicService, CryptographicService>();
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
 
-            // 5. TCP & UDP Transport Services
+            // 5. Workstation Command & Query Handlers
+            services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
+            services.AddScoped<IQueryHandler<GetWorkstationByPcIdQuery, Workstation?>, GetWorkstationByPcIdQueryHandler>();
+            services.AddScoped<ICommandHandler<AuthorizeWorkstationCommand, Workstation>, AuthorizeWorkstationCommandHandler>();
+            services.AddScoped<ICommandHandler<BindWorkstationConnectionCommand, Workstation>, BindWorkstationConnectionCommandHandler>();
+            services.AddScoped<ICommandHandler<UnbindWorkstationConnectionCommand, Workstation?>, UnbindWorkstationConnectionCommandHandler>();
+
+            // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
 
             services.AddSingleton<TcpServer>();
@@ -99,7 +110,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<IUdpDiscoveryServer>(provider => provider.GetRequiredService<UdpDiscoveryServer>());
             services.AddHostedService(provider => provider.GetRequiredService<UdpDiscoveryServer>());
 
-            // 6. Health Checks
+            // 7. Health Checks
             services.AddHealthChecks()
                 .AddDbContextCheck<ApplicationDbContext>(
                     name: "PostgreSQL",

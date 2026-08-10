@@ -11,12 +11,16 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -27,6 +31,7 @@ namespace Sayra.Backend.Infrastructure.Transport
         private readonly ITcpAuthenticationService _tcpAuthenticationService;
         private readonly ICryptographicService _cryptographicService;
         private readonly IRedisService _redisService;
+        private readonly IServiceScopeFactory? _serviceScopeFactory;
         private readonly ServerOptions _serverOptions;
         private readonly TlsOptions _tlsOptions;
         private readonly ILogger<TcpServer> _logger;
@@ -43,12 +48,14 @@ namespace Sayra.Backend.Infrastructure.Transport
             IRedisService redisService,
             IOptions<ServerOptions> serverOptions,
             IOptions<TlsOptions> tlsOptions,
-            ILogger<TcpServer> logger)
+            ILogger<TcpServer> logger,
+            IServiceScopeFactory? serviceScopeFactory = null)
         {
             _connectionRegistry = connectionRegistry ?? throw new ArgumentNullException(nameof(connectionRegistry));
             _tcpAuthenticationService = tcpAuthenticationService ?? throw new ArgumentNullException(nameof(tcpAuthenticationService));
             _cryptographicService = cryptographicService ?? throw new ArgumentNullException(nameof(cryptographicService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
+            _serviceScopeFactory = serviceScopeFactory;
             _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
             _tlsOptions = tlsOptions?.Value ?? throw new ArgumentNullException(nameof(tlsOptions));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -250,7 +257,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                 {
                     _connectionRegistry.Unregister(connectionId);
 
-                    // Clean up connection metadata from Redis cache
+                    // Clean up connection metadata from Redis cache and database workstation status
                     try
                     {
                         if (Guid.TryParse(connectionId, out var connectionGuid))
@@ -258,10 +265,21 @@ namespace Sayra.Backend.Infrastructure.Transport
                             var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
                             await _redisService.RemoveAsync(redisKey);
                         }
+
+                        if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var unbindHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<UnbindWorkstationConnectionCommand, Workstation?>>();
+                            await unbindHandler.HandleAsync(new UnbindWorkstationConnectionCommand
+                            {
+                                PcId = connection.PcId,
+                                ConnectionId = connectionId
+                            }, CancellationToken.None);
+                        }
                     }
-                    catch (Exception redisEx)
+                    catch (Exception dbEx)
                     {
-                        _logger.LogWarning(redisEx, "Failed to clean up Redis state for connection {ConnectionId} during disconnect.", connectionId);
+                        _logger.LogWarning(dbEx, "Failed to unbind workstation state for connection {ConnectionId} during disconnect.", connectionId);
                     }
 
                     await connection.DisconnectAsync(CancellationToken.None);
@@ -432,6 +450,17 @@ namespace Sayra.Backend.Infrastructure.Transport
                         {
                             var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
                             await _redisService.RemoveAsync(redisKey);
+                        }
+
+                        if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var unbindHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<UnbindWorkstationConnectionCommand, Workstation?>>();
+                            await unbindHandler.HandleAsync(new UnbindWorkstationConnectionCommand
+                            {
+                                PcId = connection.PcId,
+                                ConnectionId = connection.ConnectionId
+                            }, CancellationToken.None);
                         }
                     }
                     catch (Exception redisEx)

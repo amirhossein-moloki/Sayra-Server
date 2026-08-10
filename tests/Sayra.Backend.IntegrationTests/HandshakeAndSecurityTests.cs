@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 using Sayra.Backend.Api;
+using Sayra.Backend.Domain;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
@@ -44,6 +45,37 @@ namespace Sayra.Backend.IntegrationTests
             _cryptoService = _factory.Services.GetRequiredService<ICryptographicService>();
             _redisService = _factory.Services.GetRequiredService<IRedisService>();
             _connectionRegistry = _factory.Services.GetRequiredService<ITcpConnectionRegistry>();
+
+            // Seed test workstations to database so they are authorized during handshake tests
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
+                var pcIds = new[] { "PC-TEST-01", "PC-SECURE-MSG" };
+                foreach (var pcId in pcIds)
+                {
+                    var existing = dbContext.Workstations.FirstOrDefault(w => w.PcId == pcId);
+                    if (existing == null)
+                    {
+                        dbContext.Workstations.Add(new Workstation
+                        {
+                            PcId = pcId,
+                            Name = pcId,
+                            SiteId = "SITE-ALPHA",
+                            Hostname = "DESKTOP-TEST",
+                            MacAddress = $"00:1A:2B:3C:4D:{Random.Shared.Next(10, 99)}",
+                            IpAddress = "127.0.0.1",
+                            Status = "Offline",
+                            IsDisabled = false
+                        });
+                    }
+                    else
+                    {
+                        existing.IsDisabled = false;
+                        existing.Status = "Offline";
+                    }
+                }
+                dbContext.SaveChanges();
+            }
         }
 
         #region Helper Methods

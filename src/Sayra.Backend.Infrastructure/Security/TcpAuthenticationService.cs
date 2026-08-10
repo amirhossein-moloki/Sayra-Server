@@ -7,10 +7,15 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Domain;
+using Sayra.Backend.Domain.Exceptions;
 
 namespace Sayra.Backend.Infrastructure.Security
 {
@@ -19,6 +24,7 @@ namespace Sayra.Backend.Infrastructure.Security
         private readonly ICryptographicService _cryptographicService;
         private readonly IRedisService _redisService;
         private readonly IConfiguration _configuration;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly ILogger<TcpAuthenticationService> _logger;
         private readonly string _masterKey;
 
@@ -26,12 +32,14 @@ namespace Sayra.Backend.Infrastructure.Security
             ICryptographicService cryptographicService,
             IRedisService redisService,
             IConfiguration configuration,
-            ILogger<TcpAuthenticationService> _logger)
+            IServiceScopeFactory serviceScopeFactory,
+            ILogger<TcpAuthenticationService> logger)
         {
             _cryptographicService = cryptographicService ?? throw new ArgumentNullException(nameof(cryptographicService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-            this._logger = _logger ?? throw new ArgumentNullException(nameof(_logger));
+            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
             _masterKey = _configuration["SAYRA_MASTER_KEY"] ?? string.Empty;
             if (string.IsNullOrWhiteSpace(_masterKey))
@@ -176,7 +184,41 @@ namespace Sayra.Backend.Infrastructure.Security
                     return false;
                 }
 
-                // 6. Bind Identity & Store SessionKey
+                // 6. Device Identity Verification & Authorization Check
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var authorizeHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<AuthorizeWorkstationCommand, Workstation>>();
+                    var bindHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<BindWorkstationConnectionCommand, Workstation>>();
+
+                    // Verify if device exists and is authorized (not disabled)
+                    var authResult = await authorizeHandler.HandleAsync(new AuthorizeWorkstationCommand { PcId = responseDto.PcId }, cts.Token);
+                    if (!authResult.IsSuccess)
+                    {
+                        var errorCode = authResult.ErrorCode == "DEVICE_NOT_REGISTERED" ? "DEVICE_NOT_REGISTERED" : "AUTH_FAILED";
+                        _logger.LogWarning("Device authorization failed for PC-ID {PcId}: {ErrorCode} - {Message}", responseDto.PcId, errorCode, authResult.ErrorMessage);
+                        await SendAuthStatusAndCloseAsync(connection, stream, errorCode, authResult.ErrorMessage ?? "Device authorization failed", cts.Token);
+                        return false;
+                    }
+
+                    // Perform connection binding, replace any concurrent connection, update state to Online
+                    var bindResult = await bindHandler.HandleAsync(new BindWorkstationConnectionCommand
+                    {
+                        PcId = responseDto.PcId,
+                        ConnectionId = connection.ConnectionId,
+                        SiteId = responseDto.SiteId ?? string.Empty,
+                        Hostname = responseDto.Hostname ?? string.Empty,
+                        ClientVersion = responseDto.ClientVersion ?? string.Empty
+                    }, cts.Token);
+
+                    if (!bindResult.IsSuccess)
+                    {
+                        _logger.LogWarning("Device binding failed for PC-ID {PcId}: {Message}", responseDto.PcId, bindResult.ErrorMessage);
+                        await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", bindResult.ErrorMessage ?? "Device binding failed", cts.Token);
+                        return false;
+                    }
+                }
+
+                // 7. Bind Identity & Store SessionKey in persistent Connection context
                 connection.SessionKey = decryptedSessionKey;
                 connection.PcId = responseDto.PcId;
                 connection.Hostname = responseDto.Hostname;
@@ -227,6 +269,18 @@ namespace Sayra.Backend.Infrastructure.Security
                 }
 
                 return true;
+            }
+            catch (DeviceNotRegisteredException ex)
+            {
+                _logger.LogWarning("Device not registered during handshake for connection {ConnectionId}. Error: {Message}", connection.ConnectionId, ex.Message);
+                await SendAuthStatusAndCloseAsync(connection, stream, "DEVICE_NOT_REGISTERED", ex.Message, CancellationToken.None);
+                return false;
+            }
+            catch (AuthFailedException ex)
+            {
+                _logger.LogWarning("Device authorization failed during handshake for connection {ConnectionId}. Error: {Message}", connection.ConnectionId, ex.Message);
+                await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", ex.Message, CancellationToken.None);
+                return false;
             }
             catch (OperationCanceledException)
             {

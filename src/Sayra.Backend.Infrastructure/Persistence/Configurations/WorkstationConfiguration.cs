@@ -16,12 +16,30 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasMaxLength(100);
 
+            builder.Property(w => w.PcId)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            builder.Property(w => w.SiteId)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            builder.Property(w => w.Hostname)
+                .IsRequired()
+                .HasMaxLength(100);
+
             builder.Property(w => w.IpAddress)
                 .IsRequired()
                 .HasMaxLength(50);
 
             builder.Property(w => w.MacAddress)
                 .IsRequired()
+                .HasMaxLength(50);
+
+            builder.Property(w => w.ClientVersion)
+                .HasMaxLength(50);
+
+            builder.Property(w => w.OsVersion)
                 .HasMaxLength(50);
 
             builder.Property(w => w.Status)
@@ -32,6 +50,10 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(w => w.LastSeen)
                 .IsRequired();
 
+            builder.Property(w => w.IsDisabled)
+                .IsRequired()
+                .HasDefaultValue(false);
+
             builder.Property(w => w.VerificationPublicKey)
                 .HasColumnType("bytea");
 
@@ -39,9 +61,12 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRowVersion()
                 .IsConcurrencyToken();
 
-            // Indexing for workstation queries
-            builder.HasIndex(w => w.IpAddress).IsUnique();
+            // Indexes/Constraints mapping
+            builder.HasIndex(w => w.PcId).IsUnique();
             builder.HasIndex(w => w.MacAddress).IsUnique();
+            builder.HasIndex(w => w.SiteId);
+            builder.HasIndex(w => w.Status);
+            builder.HasIndex(w => w.LastSeen);
         }
     }
 }
