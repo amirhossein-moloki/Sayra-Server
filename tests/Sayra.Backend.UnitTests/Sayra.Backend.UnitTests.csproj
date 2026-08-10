@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Sayra.Backend.Contracts\Sayra.Backend.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Sayra.Backend.Api\Sayra.Backend.Api.csproj" />
     <ProjectReference Include="..\..\src\Sayra.Backend.Infrastructure\Sayra.Backend.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Sayra.Backend.Application\Sayra.Backend.Application.csproj" />

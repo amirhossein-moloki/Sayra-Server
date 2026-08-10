@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Sayra.Backend.Contracts\Sayra.Backend.Contracts.csproj" />
     <ProjectReference Include="..\Sayra.Backend.Domain\Sayra.Backend.Domain.csproj" />
     <ProjectReference Include="..\Sayra.Backend.Shared\Sayra.Backend.Shared.csproj" />
   </ItemGroup>
