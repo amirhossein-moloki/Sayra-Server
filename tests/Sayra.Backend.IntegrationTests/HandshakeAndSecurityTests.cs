@@ -62,7 +62,7 @@ namespace Sayra.Backend.IntegrationTests
                             Name = pcId,
                             SiteId = "SITE-ALPHA",
                             Hostname = "DESKTOP-TEST",
-                            MacAddress = $"00:1A:2B:3C:4D:{Random.Shared.Next(10, 99)}",
+                            MacAddress = $"00:1A:2B:3C:4D:{(uint)pcId.GetHashCode() % 90 + 10:00}",
                             IpAddress = "127.0.0.1",
                             Status = "Offline",
                             IsDisabled = false
@@ -104,7 +104,8 @@ namespace Sayra.Backend.IntegrationTests
                 _redisService,
                 serverOpts,
                 tlsOpts,
-                serverLogger);
+                serverLogger,
+                _factory.Services.GetRequiredService<IServiceScopeFactory>());
 
             await server.StartAsync(CancellationToken.None);
             return (server, port);

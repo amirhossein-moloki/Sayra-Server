@@ -14,12 +14,14 @@ namespace Sayra.Backend.Infrastructure.Transport
         private ConnectionLifecycleState _state;
         private bool _disposed;
 
-        public TcpConnection(string connectionId, TcpClient tcpClient, Stream stream)
+        public TcpConnection(string connectionId, TcpClient tcpClient, Stream stream, int maxMessageSizeBytes = 65536)
         {
             ConnectionId = connectionId ?? throw new ArgumentNullException(nameof(connectionId));
             _tcpClient = tcpClient ?? throw new ArgumentNullException(nameof(tcpClient));
             _stream = stream ?? throw new ArgumentNullException(nameof(stream));
             _state = ConnectionLifecycleState.Connecting;
+            Reader = new MessageFrameReader(stream, maxMessageSizeBytes);
+            Writer = new MessageFrameWriter(stream);
         }
 
         public string ConnectionId { get; }
@@ -31,6 +33,8 @@ namespace Sayra.Backend.Infrastructure.Transport
         public string? Hostname { get; set; }
         public string? SiteId { get; set; }
         public string? ClientVersion { get; set; }
+        public IMessageFrameReader Reader { get; }
+        public IMessageFrameWriter Writer { get; }
 
         public Stream GetStream()
         {

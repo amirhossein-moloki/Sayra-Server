@@ -21,6 +21,7 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -189,7 +190,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                     _logger.LogInformation("TLS 1.3 Handshake completed successfully on connection {ConnectionId}.", connectionId);
                 }
 
-                connection = new TcpConnection(connectionId, tcpClient, networkStream);
+                connection = new TcpConnection(connectionId, tcpClient, networkStream, _serverOptions.MaxMessageSizeBytes);
                 connection.UpdateState(ConnectionLifecycleState.Connecting);
 
                 // Register connection
@@ -206,39 +207,38 @@ namespace Sayra.Backend.Infrastructure.Transport
 
                 _logger.LogInformation("TCP connection {ConnectionId} successfully authenticated. Entering post-auth message loop.", connectionId);
 
-                // Continuous secure message parsing loop
-                var parser = new TcpFrameParser();
-                byte[] buffer = new byte[4096];
-
+                // Continuous secure message parsing loop using framing layer reader
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    int bytesRead = await networkStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
-                    if (bytesRead == 0)
+                    string? frame;
+                    try
+                    {
+                        frame = await connection.Reader.ReadFrameAsync(cancellationToken);
+                    }
+                    catch (Sayra.Backend.Domain.Exceptions.ProtocolException ex)
+                    {
+                        _logger.LogWarning(ex, "Protocol framing error on connection {ConnectionId}. ErrorCode: {ErrorCode}. Closing connection.", connectionId, ex.ErrorCode);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error reading frame from connection {ConnectionId}. Closing connection.", connectionId);
+                        break;
+                    }
+
+                    if (frame == null)
                     {
                         _logger.LogInformation("TCP client on connection {ConnectionId} disconnected gracefully.", connectionId);
                         break; // EOF reached
                     }
 
-                    parser.Append(buffer, bytesRead);
-                    var frames = parser.ExtractFrames();
-                    bool shouldClose = false;
-
-                    foreach (var frame in frames)
+                    try
                     {
-                        try
-                        {
-                            await ProcessSecureMessageAsync(connection, frame, cancellationToken);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Security or protocol violation on connection {ConnectionId}. Terminating connection.", connectionId);
-                            shouldClose = true;
-                            break;
-                        }
+                        await ProcessSecureMessageAsync(connection, frame, cancellationToken);
                     }
-
-                    if (shouldClose)
+                    catch (Exception ex)
                     {
+                        _logger.LogWarning(ex, "Security or protocol violation on connection {ConnectionId}. Terminating connection.", connectionId);
                         break;
                     }
                 }
@@ -297,46 +297,67 @@ namespace Sayra.Backend.Infrastructure.Transport
         private async Task ProcessSecureMessageAsync(ITcpConnection connection, string frame, CancellationToken cancellationToken)
         {
             // Parse SecureMessageEnvelope
-            SecureMessageEnvelope? envelope;
+            Sayra.Backend.Contracts.SecureMessageEnvelope? envelope;
             try
             {
-                envelope = JsonSerializer.Deserialize<SecureMessageEnvelope>(frame, new JsonSerializerOptions
+                envelope = JsonSerializer.Deserialize<Sayra.Backend.Contracts.SecureMessageEnvelope>(frame, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
             }
             catch (JsonException ex)
             {
-                _logger.LogWarning(ex, "Malformed JSON secure message on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Malformed envelope JSON.");
+                _logger.LogWarning(
+                    ex,
+                    "Malformed JSON secure envelope. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}, FrameSize: {FrameSize}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.InvalidJson,
+                    frame.Length);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.InvalidJson, "Malformed envelope JSON.");
             }
 
             if (envelope == null || string.IsNullOrWhiteSpace(envelope.Payload) || string.IsNullOrWhiteSpace(envelope.Signature) || string.IsNullOrWhiteSpace(envelope.Timestamp))
             {
-                _logger.LogWarning("Empty or malformed SecureMessageEnvelope fields on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Malformed envelope properties.");
+                _logger.LogWarning(
+                    "Malformed secure envelope properties. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}, FrameSize: {FrameSize}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.InvalidMessage,
+                    frame.Length);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.InvalidMessage, "Malformed envelope properties.");
             }
 
             // 1. Verify Timestamp Freshness
             if (!DateTime.TryParse(envelope.Timestamp, out var timestamp))
             {
-                _logger.LogWarning("Invalid timestamp '{Timestamp}' on connection {ConnectionId}.", envelope.Timestamp, connection.ConnectionId);
-                throw new InvalidOperationException("Invalid timestamp format.");
+                _logger.LogWarning(
+                    "Invalid envelope timestamp format. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}, Timestamp: {Timestamp}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError,
+                    envelope.Timestamp);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Invalid timestamp format.");
             }
 
             var now = DateTime.UtcNow;
             var drift = Math.Abs((now - timestamp.ToUniversalTime()).TotalSeconds);
             if (drift > 300)
             {
-                _logger.LogWarning("Timestamp drift of {Drift}s exceeded 300s window on connection {ConnectionId}.", drift, connection.ConnectionId);
-                throw new InvalidOperationException("Timestamp drift exceeded limit.");
+                _logger.LogWarning(
+                    "Envelope timestamp drift of {Drift}s exceeded 300s window. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    drift,
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Timestamp drift exceeded limit.");
             }
 
             // 2. Validate HMAC-SHA256 Signature using session key
             if (connection.SessionKey == null)
             {
                 _logger.LogWarning("Connection {ConnectionId} has no negotiated SessionKey.", connection.ConnectionId);
-                throw new InvalidOperationException("Unauthenticated secure message.");
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Unauthenticated secure message.");
             }
 
             string signatureInput = envelope.Payload + "|" + envelope.Timestamp;
@@ -350,14 +371,22 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
             catch (FormatException)
             {
-                _logger.LogWarning("Invalid Base64 signature field on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Invalid signature Base64.");
+                _logger.LogWarning(
+                    "Invalid Base64 signature field. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Invalid signature Base64.");
             }
 
             if (!CryptographicOperations.FixedTimeEquals(expectedSignature, clientSignatureBytes))
             {
-                _logger.LogWarning("Signature verification failed on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Signature mismatch.");
+                _logger.LogWarning(
+                    "Envelope signature mismatch. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Signature mismatch.");
             }
 
             // 3. Decrypt ciphertext payload using session key
@@ -368,14 +397,22 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
             catch (FormatException)
             {
-                _logger.LogWarning("Invalid Base64 payload field on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Invalid payload Base64.");
+                _logger.LogWarning(
+                    "Invalid Base64 payload field. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Invalid payload Base64.");
             }
 
             if (rawPayloadBytes.Length < 16)
             {
-                _logger.LogWarning("Payload payload is shorter than 16-byte IV on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Payload too short.");
+                _logger.LogWarning(
+                    "Payload payload too short. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Payload too short.");
             }
 
             byte[] iv = new byte[16];
@@ -390,14 +427,57 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Payload decryption failure on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Decryption failed.");
+                _logger.LogWarning(
+                    ex,
+                    "Payload decryption failure. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError);
+                throw new Sayra.Backend.Domain.Exceptions.ProtocolException(Sayra.Backend.Domain.Exceptions.ProtocolException.ProtocolError, "Decryption failed.");
             }
 
             string decryptedPayload = Encoding.UTF8.GetString(decryptedBytes);
-            _logger.LogDebug("Successfully processed secure message frame from {ConnectionId}.", connection.ConnectionId);
+            int frameSize = decryptedPayload.Length;
 
-            // Payload is decrypted and validated. Further stages will route this decrypted payload.
+            object? resolvedContract = null;
+            string? messageType = null;
+            string? correlationId = null;
+
+            try
+            {
+                resolvedContract = Sayra.Backend.Application.Transport.ProtocolMessageResolver.ResolveAndDeserialize(decryptedPayload);
+                messageType = resolvedContract?.GetType().Name;
+
+                if (resolvedContract != null)
+                {
+                    var corrProp = resolvedContract.GetType().GetProperty("CorrelationId");
+                    if (corrProp != null)
+                    {
+                        correlationId = corrProp.GetValue(resolvedContract) as string;
+                    }
+                }
+
+                _logger.LogInformation(
+                    "Processed secure message. ConnectionId: {ConnectionId}, PcId: {PcId}, MessageType: {MessageType}, FrameSize: {FrameSize}, CorrelationId: {CorrelationId}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    messageType,
+                    frameSize,
+                    correlationId);
+            }
+            catch (Sayra.Backend.Domain.Exceptions.ProtocolException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Protocol or serialization error on secure message. ConnectionId: {ConnectionId}, PcId: {PcId}, ErrorCode: {ErrorCode}, MessageType: {MessageType}, FrameSize: {FrameSize}",
+                    connection.ConnectionId,
+                    connection.PcId,
+                    ex.ErrorCode,
+                    messageType ?? "UNKNOWN",
+                    frameSize);
+                throw;
+            }
+
             await Task.CompletedTask;
         }
 
@@ -499,48 +579,6 @@ namespace Sayra.Backend.Infrastructure.Transport
         {
             _cts?.Dispose();
             _serverCertificate?.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n'.
-    /// </summary>
-    public class TcpFrameParser
-    {
-        private readonly List<byte> _buffer = new();
-        private readonly object _lock = new();
-
-        public void Append(byte[] data, int length)
-        {
-            lock (_lock)
-            {
-                for (int i = 0; i < length; i++)
-                {
-                    _buffer.Add(data[i]);
-                }
-            }
-        }
-
-        public List<string> ExtractFrames()
-        {
-            var frames = new List<string>();
-            lock (_lock)
-            {
-                int index;
-                while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
-                {
-                    byte[] frameBytes = new byte[index];
-                    _buffer.CopyTo(0, frameBytes, 0, index);
-                    _buffer.RemoveRange(0, index + 1);
-
-                    string frameStr = Encoding.UTF8.GetString(frameBytes).Trim();
-                    if (!string.IsNullOrEmpty(frameStr))
-                    {
-                        frames.Add(frameStr);
-                    }
-                }
-            }
-            return frames;
         }
     }
 }
