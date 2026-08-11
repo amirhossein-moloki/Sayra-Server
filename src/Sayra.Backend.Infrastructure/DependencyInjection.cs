@@ -90,6 +90,7 @@ namespace Sayra.Backend.Infrastructure
 
             // 4. Security & Cryptographic abstractions
             services.AddSingleton<ICryptographicService, CryptographicService>();
+            services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
 
             // 5. Workstation Command & Query Handlers
