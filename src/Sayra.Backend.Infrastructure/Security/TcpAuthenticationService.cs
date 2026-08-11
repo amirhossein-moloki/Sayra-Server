@@ -21,37 +21,23 @@ namespace Sayra.Backend.Infrastructure.Security
 {
     public class TcpAuthenticationService : ITcpAuthenticationService
     {
-        private readonly ICryptographicService _cryptographicService;
+        private readonly IClientAuthenticationService _clientAuthenticationService;
         private readonly IRedisService _redisService;
-        private readonly IConfiguration _configuration;
-        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly ILogger<TcpAuthenticationService> _logger;
-        private readonly string _masterKey;
 
         public TcpAuthenticationService(
-            ICryptographicService cryptographicService,
+            IClientAuthenticationService clientAuthenticationService,
             IRedisService redisService,
-            IConfiguration configuration,
-            IServiceScopeFactory serviceScopeFactory,
             ILogger<TcpAuthenticationService> logger)
         {
-            _cryptographicService = cryptographicService ?? throw new ArgumentNullException(nameof(cryptographicService));
+            _clientAuthenticationService = clientAuthenticationService ?? throw new ArgumentNullException(nameof(clientAuthenticationService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
-            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-            _masterKey = _configuration["SAYRA_MASTER_KEY"] ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(_masterKey))
-            {
-                throw new InvalidOperationException("Critical configuration 'SAYRA_MASTER_KEY' is missing or empty.");
-            }
         }
 
         public async Task<bool> AuthenticateAsync(ITcpConnection connection, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Starting authentication handshake for connection {ConnectionId}...", connection.ConnectionId);
-            connection.UpdateState(ConnectionLifecycleState.Authenticating);
+            _logger.LogInformation("Starting secure TCP authentication handshake delegation for connection {ConnectionId}...", connection.ConnectionId);
 
             Stream stream;
             try
@@ -64,16 +50,16 @@ namespace Sayra.Backend.Infrastructure.Security
                 return false;
             }
 
+            bool isSuccess = false;
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(5)); // Handshake timeout
 
-                // 1. Generate random 32-byte challenge
-                byte[] challengeBytes = RandomNumberGenerator.GetBytes(32);
-                string challengeBase64 = Convert.ToBase64String(challengeBytes);
+                // 1. Generate challenge using delegated authentication service
+                string challengeBase64 = await _clientAuthenticationService.GenerateChallengeAsync(connection, cts.Token);
 
-                // 2. Send AUTH_CHALLENGE
+                // 2. Send AUTH_CHALLENGE to the stream
                 var challengeDto = new AuthChallengeDto
                 {
                     Type = "AUTH_CHALLENGE",
@@ -85,7 +71,7 @@ namespace Sayra.Backend.Infrastructure.Security
                 await stream.FlushAsync(cts.Token);
                 _logger.LogDebug("Sent AUTH_CHALLENGE to connection {ConnectionId}.", connection.ConnectionId);
 
-                // 3. Read AUTH_RESPONSE
+                // 3. Read AUTH_RESPONSE from stream
                 string? responseLine = await ReadLineWithLimitAsync(stream, 8192, cts.Token); // 8KB limit
                 if (string.IsNullOrEmpty(responseLine))
                 {
@@ -116,119 +102,18 @@ namespace Sayra.Backend.Infrastructure.Security
                     return false;
                 }
 
-                // 4. Validate HMAC-SHA256
-                byte[] masterKeyBytes = Encoding.UTF8.GetBytes(_masterKey);
-                byte[] challengeStringToSign = Encoding.UTF8.GetBytes(challengeBase64);
-                byte[] expectedHmac = _cryptographicService.ComputeHmacSha256(challengeStringToSign, masterKeyBytes);
-
-                byte[] clientHmacBytes;
-                try
+                // 4. Validate the response using delegated authentication service
+                var authResult = await _clientAuthenticationService.ValidateResponseAsync(connection, responseDto, cts.Token);
+                if (!authResult.IsSuccess)
                 {
-                    clientHmacBytes = Convert.FromBase64String(responseDto.Hmac);
-                }
-                catch (FormatException)
-                {
-                    _logger.LogWarning("Connection {ConnectionId} sent invalid Base64 for HMAC.", connection.ConnectionId);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Invalid HMAC Base64", cts.Token);
+                    _logger.LogWarning("Authentication failed for connection {ConnectionId}: {ErrorCode} - {Message}", connection.ConnectionId, authResult.ErrorCode, authResult.ErrorMessage);
+                    await SendAuthStatusAndCloseAsync(connection, stream, authResult.ErrorCode ?? "AUTH_FAILED", authResult.ErrorMessage ?? "Authentication failed", cts.Token);
                     return false;
                 }
 
-                // Constant-time HMAC comparison
-                if (!CryptographicOperations.FixedTimeEquals(expectedHmac, clientHmacBytes))
-                {
-                    _logger.LogWarning("HMAC verification failed for connection {ConnectionId}. Expected signature does not match.", connection.ConnectionId);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "HMAC challenge response verification failed", cts.Token);
-                    return false;
-                }
+                _logger.LogInformation("Connection {ConnectionId} successfully authenticated. Device PC-ID: {PcId}.", connection.ConnectionId, connection.PcId);
 
-                // 5. Decrypt SessionKey
-                byte[] aesKey = masterKeyBytes.Length == 32 ? masterKeyBytes : SHA256.HashData(masterKeyBytes);
-                byte[] ivBytes;
-                byte[] encryptedSessionKeyBytes;
-
-                try
-                {
-                    ivBytes = Convert.FromBase64String(responseDto.Iv);
-                    encryptedSessionKeyBytes = Convert.FromBase64String(responseDto.EncryptedSessionKey);
-                }
-                catch (FormatException)
-                {
-                    _logger.LogWarning("Connection {ConnectionId} sent invalid Base64 for IV or EncryptedSessionKey.", connection.ConnectionId);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Invalid cryptographic Base64 fields", cts.Token);
-                    return false;
-                }
-
-                if (ivBytes.Length != 16)
-                {
-                    _logger.LogWarning("Connection {ConnectionId} sent IV of invalid length: {Length} bytes.", connection.ConnectionId, ivBytes.Length);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Invalid IV length", cts.Token);
-                    return false;
-                }
-
-                byte[] decryptedSessionKey;
-                try
-                {
-                    decryptedSessionKey = _cryptographicService.DecryptAes256Cbc(encryptedSessionKeyBytes, aesKey, ivBytes);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "SessionKey decryption failed for connection {ConnectionId}.", connection.ConnectionId);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "SessionKey decryption failed", cts.Token);
-                    return false;
-                }
-
-                if (decryptedSessionKey.Length != 32)
-                {
-                    _logger.LogWarning("Decrypted SessionKey for connection {ConnectionId} has invalid length: {Length} bytes.", connection.ConnectionId, decryptedSessionKey.Length);
-                    await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Invalid SessionKey length", cts.Token);
-                    return false;
-                }
-
-                // 6. Device Identity Verification & Authorization Check
-                using (var scope = _serviceScopeFactory.CreateScope())
-                {
-                    var authorizeHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<AuthorizeWorkstationCommand, Workstation>>();
-                    var bindHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<BindWorkstationConnectionCommand, Workstation>>();
-
-                    // Verify if device exists and is authorized (not disabled)
-                    var authResult = await authorizeHandler.HandleAsync(new AuthorizeWorkstationCommand { PcId = responseDto.PcId }, cts.Token);
-                    if (!authResult.IsSuccess)
-                    {
-                        var errorCode = authResult.ErrorCode == "DEVICE_NOT_REGISTERED" ? "DEVICE_NOT_REGISTERED" : "AUTH_FAILED";
-                        _logger.LogWarning("Device authorization failed for PC-ID {PcId}: {ErrorCode} - {Message}", responseDto.PcId, errorCode, authResult.ErrorMessage);
-                        await SendAuthStatusAndCloseAsync(connection, stream, errorCode, authResult.ErrorMessage ?? "Device authorization failed", cts.Token);
-                        return false;
-                    }
-
-                    // Perform connection binding, replace any concurrent connection, update state to Online
-                    var bindResult = await bindHandler.HandleAsync(new BindWorkstationConnectionCommand
-                    {
-                        PcId = responseDto.PcId,
-                        ConnectionId = connection.ConnectionId,
-                        SiteId = responseDto.SiteId ?? string.Empty,
-                        Hostname = responseDto.Hostname ?? string.Empty,
-                        ClientVersion = responseDto.ClientVersion ?? string.Empty
-                    }, cts.Token);
-
-                    if (!bindResult.IsSuccess)
-                    {
-                        _logger.LogWarning("Device binding failed for PC-ID {PcId}: {Message}", responseDto.PcId, bindResult.ErrorMessage);
-                        await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", bindResult.ErrorMessage ?? "Device binding failed", cts.Token);
-                        return false;
-                    }
-                }
-
-                // 7. Bind Identity & Store SessionKey in persistent Connection context
-                connection.SessionKey = decryptedSessionKey;
-                connection.PcId = responseDto.PcId;
-                connection.Hostname = responseDto.Hostname;
-                connection.SiteId = responseDto.SiteId;
-                connection.ClientVersion = responseDto.ClientVersion;
-
-                connection.UpdateState(ConnectionLifecycleState.Authenticated);
-                _logger.LogInformation("Connection {ConnectionId} successfully authenticated. Device PC-ID: {PcId}, Host: {Hostname}.", connection.ConnectionId, responseDto.PcId, responseDto.Hostname);
-
-                // Send success AUTH_STATUS
+                // 5. Send success AUTH_STATUS to client
                 var successStatus = new AuthStatusDto
                 {
                     Type = "AUTH_STATUS",
@@ -241,10 +126,10 @@ namespace Sayra.Backend.Infrastructure.Security
                 await stream.WriteAsync(successBytes, 0, successBytes.Length, cts.Token);
                 await stream.FlushAsync(cts.Token);
 
-                // Transition to Active State
+                // 6. Transition Connection Lifecycle State to Active
                 connection.UpdateState(ConnectionLifecycleState.Active);
 
-                // Cache connection state metadata in Redis securely
+                // 7. Cache connection state metadata in Redis securely
                 try
                 {
                     if (Guid.TryParse(connection.ConnectionId, out var connectionGuid))
@@ -268,6 +153,7 @@ namespace Sayra.Backend.Infrastructure.Security
                     _logger.LogWarning(redisEx, "Failed to cache connection state in Redis for {ConnectionId}.", connection.ConnectionId);
                 }
 
+                isSuccess = true;
                 return true;
             }
             catch (DeviceNotRegisteredException ex)
@@ -282,6 +168,12 @@ namespace Sayra.Backend.Infrastructure.Security
                 await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", ex.Message, CancellationToken.None);
                 return false;
             }
+            catch (AuthenticationException ex)
+            {
+                _logger.LogWarning("AuthenticationException during handshake for connection {ConnectionId}. Error: {Message}", connection.ConnectionId, ex.Message);
+                await SendAuthStatusAndCloseAsync(connection, stream, ex.ErrorCode, ex.Message, CancellationToken.None);
+                return false;
+            }
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Authentication handshake timed out or was canceled for connection {ConnectionId}.", connection.ConnectionId);
@@ -293,6 +185,13 @@ namespace Sayra.Backend.Infrastructure.Security
                 _logger.LogError(ex, "Unexpected error during authentication handshake for connection {ConnectionId}.", connection.ConnectionId);
                 connection.UpdateState(ConnectionLifecycleState.Disconnected);
                 return false;
+            }
+            finally
+            {
+                if (!isSuccess)
+                {
+                    _clientAuthenticationService.CleanupSession(connection.ConnectionId);
+                }
             }
         }
 
