@@ -19,6 +19,7 @@ using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Configuration.Options;
@@ -31,6 +32,7 @@ namespace Sayra.Backend.Infrastructure.Transport
         private readonly ITcpAuthenticationService _tcpAuthenticationService;
         private readonly ICryptographicService _cryptographicService;
         private readonly IRedisService _redisService;
+        private readonly ISecureMessageService _secureMessageService;
         private readonly IServiceScopeFactory? _serviceScopeFactory;
         private readonly ServerOptions _serverOptions;
         private readonly TlsOptions _tlsOptions;
@@ -46,6 +48,7 @@ namespace Sayra.Backend.Infrastructure.Transport
             ITcpAuthenticationService tcpAuthenticationService,
             ICryptographicService cryptographicService,
             IRedisService redisService,
+            ISecureMessageService secureMessageService,
             IOptions<ServerOptions> serverOptions,
             IOptions<TlsOptions> tlsOptions,
             ILogger<TcpServer> logger,
@@ -55,6 +58,7 @@ namespace Sayra.Backend.Infrastructure.Transport
             _tcpAuthenticationService = tcpAuthenticationService ?? throw new ArgumentNullException(nameof(tcpAuthenticationService));
             _cryptographicService = cryptographicService ?? throw new ArgumentNullException(nameof(cryptographicService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
+            _secureMessageService = secureMessageService ?? throw new ArgumentNullException(nameof(secureMessageService));
             _serviceScopeFactory = serviceScopeFactory;
             _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
             _tlsOptions = tlsOptions?.Value ?? throw new ArgumentNullException(nameof(tlsOptions));
@@ -297,10 +301,10 @@ namespace Sayra.Backend.Infrastructure.Transport
         private async Task ProcessSecureMessageAsync(ITcpConnection connection, string frame, CancellationToken cancellationToken)
         {
             // Parse SecureMessageEnvelope
-            SecureMessageEnvelope? envelope;
+            Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope? envelope;
             try
             {
-                envelope = JsonSerializer.Deserialize<SecureMessageEnvelope>(frame, new JsonSerializerOptions
+                envelope = JsonSerializer.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(frame, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
@@ -317,84 +321,27 @@ namespace Sayra.Backend.Infrastructure.Transport
                 throw new InvalidOperationException("Malformed envelope properties.");
             }
 
-            // 1. Verify Timestamp Freshness
-            if (!DateTime.TryParse(envelope.Timestamp, out var timestamp))
+            var session = new ConnectionSession
             {
-                _logger.LogWarning("Invalid timestamp '{Timestamp}' on connection {ConnectionId}.", envelope.Timestamp, connection.ConnectionId);
-                throw new InvalidOperationException("Invalid timestamp format.");
+                ConnectionId = connection.ConnectionId,
+                PcId = connection.PcId,
+                SessionKey = connection.SessionKey,
+                HandshakeState = connection.State
+            };
+
+            var appEnvelope = new Sayra.Backend.Application.Security.SecureMessageEnvelope
+            {
+                Payload = envelope.Payload,
+                Signature = envelope.Signature,
+                Timestamp = envelope.Timestamp
+            };
+
+            var validationResult = await _secureMessageService.HandleSecureMessageAsync(session, appEnvelope);
+            if (!validationResult.IsSuccess)
+            {
+                throw new InvalidOperationException(validationResult.ErrorMessage ?? "Validation failed.");
             }
 
-            var now = DateTime.UtcNow;
-            var drift = Math.Abs((now - timestamp.ToUniversalTime()).TotalSeconds);
-            if (drift > 300)
-            {
-                _logger.LogWarning("Timestamp drift of {Drift}s exceeded 300s window on connection {ConnectionId}.", drift, connection.ConnectionId);
-                throw new InvalidOperationException("Timestamp drift exceeded limit.");
-            }
-
-            // 2. Validate HMAC-SHA256 Signature using session key
-            if (connection.SessionKey == null)
-            {
-                _logger.LogWarning("Connection {ConnectionId} has no negotiated SessionKey.", connection.ConnectionId);
-                throw new InvalidOperationException("Unauthenticated secure message.");
-            }
-
-            string signatureInput = envelope.Payload + "|" + envelope.Timestamp;
-            byte[] signatureInputBytes = Encoding.UTF8.GetBytes(signatureInput);
-            byte[] expectedSignature = _cryptographicService.ComputeHmacSha256(signatureInputBytes, connection.SessionKey);
-
-            byte[] clientSignatureBytes;
-            try
-            {
-                clientSignatureBytes = Convert.FromBase64String(envelope.Signature);
-            }
-            catch (FormatException)
-            {
-                _logger.LogWarning("Invalid Base64 signature field on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Invalid signature Base64.");
-            }
-
-            if (!CryptographicOperations.FixedTimeEquals(expectedSignature, clientSignatureBytes))
-            {
-                _logger.LogWarning("Signature verification failed on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Signature mismatch.");
-            }
-
-            // 3. Decrypt ciphertext payload using session key
-            byte[] rawPayloadBytes;
-            try
-            {
-                rawPayloadBytes = Convert.FromBase64String(envelope.Payload);
-            }
-            catch (FormatException)
-            {
-                _logger.LogWarning("Invalid Base64 payload field on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Invalid payload Base64.");
-            }
-
-            if (rawPayloadBytes.Length < 16)
-            {
-                _logger.LogWarning("Payload payload is shorter than 16-byte IV on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Payload too short.");
-            }
-
-            byte[] iv = new byte[16];
-            byte[] ciphertext = new byte[rawPayloadBytes.Length - 16];
-            Buffer.BlockCopy(rawPayloadBytes, 0, iv, 0, 16);
-            Buffer.BlockCopy(rawPayloadBytes, 16, ciphertext, 0, ciphertext.Length);
-
-            byte[] decryptedBytes;
-            try
-            {
-                decryptedBytes = _cryptographicService.DecryptAes256Cbc(ciphertext, connection.SessionKey, iv);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Payload decryption failure on connection {ConnectionId}.", connection.ConnectionId);
-                throw new InvalidOperationException("Decryption failed.");
-            }
-
-            string decryptedPayload = Encoding.UTF8.GetString(decryptedBytes);
             _logger.LogDebug("Successfully processed secure message frame from {ConnectionId}.", connection.ConnectionId);
 
             // Payload is decrypted and validated. Further stages will route this decrypted payload.

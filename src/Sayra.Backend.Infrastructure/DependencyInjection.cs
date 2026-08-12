@@ -8,6 +8,7 @@ using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Caching;
@@ -92,6 +93,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ICryptographicService, CryptographicService>();
             services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
+            services.AddSingleton<ISecureMessageService, SecureMessageService>();
 
             // 5. Workstation Command & Query Handlers
             services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
