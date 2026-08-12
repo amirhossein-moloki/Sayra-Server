@@ -1,10 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "7He7m8JmP6w=",
+  "dgSpecHash": "4ySaVrXMR4A=",
   "success": true,
   "projectFilePath": "/app/src/Sayra.Backend.Modules/Fleet/Fleet.csproj",
   "expectedPackageFiles": [
     "/home/jules/.nuget/packages/fluentvalidation/12.1.1/fluentvalidation.12.1.1.nupkg.sha512",
+    "/home/jules/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/8.0.0/microsoft.extensions.dependencyinjection.abstractions.8.0.0.nupkg.sha512",
+    "/home/jules/.nuget/packages/microsoft.extensions.logging.abstractions/8.0.0/microsoft.extensions.logging.abstractions.8.0.0.nupkg.sha512",
     "/home/jules/.nuget/packages/system.text.encodings.web/8.0.0/system.text.encodings.web.8.0.0.nupkg.sha512",
     "/home/jules/.nuget/packages/system.text.json/8.0.4/system.text.json.8.0.4.nupkg.sha512"
   ],

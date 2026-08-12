@@ -18,6 +18,7 @@ using Sayra.Backend.Api.Models;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Configuration;
 using Sayra.Backend.Infrastructure.Security;
@@ -235,8 +236,9 @@ namespace Sayra.Backend.IntegrationTests
             var mockAuthService = new MockTcpAuthenticationService();
             var mockCryptoService = new CryptographicService();
             var mockRedisService = new MockRedisService();
+            var mockSecureMsgService = new SecureMessageService(mockCryptoService, registry, loggerFactory.CreateLogger<SecureMessageService>());
 
-            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, serverOpts, tlsOpts, serverLogger);
+            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, mockSecureMsgService, serverOpts, tlsOpts, serverLogger);
 
             // Start Server
             await server.StartAsync(CancellationToken.None);
@@ -288,8 +290,9 @@ namespace Sayra.Backend.IntegrationTests
             var mockAuthService = new MockTcpAuthenticationService();
             var mockCryptoService = new CryptographicService();
             var mockRedisService = new MockRedisService();
+            var mockSecureMsgService = new SecureMessageService(mockCryptoService, registry, loggerFactory.CreateLogger<SecureMessageService>());
 
-            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, serverOpts, tlsOpts, serverLogger);
+            using var server = new TcpServer(registry, mockAuthService, mockCryptoService, mockRedisService, mockSecureMsgService, serverOpts, tlsOpts, serverLogger);
 
             await server.StartAsync(CancellationToken.None);
 

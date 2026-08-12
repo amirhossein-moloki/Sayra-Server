@@ -20,6 +20,7 @@ using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Configuration.Options;
@@ -35,6 +36,7 @@ namespace Sayra.Backend.IntegrationTests
         private readonly ICryptographicService _cryptoService;
         private readonly IRedisService _redisService;
         private readonly ITcpConnectionRegistry _connectionRegistry;
+        private readonly ISecureMessageService _secureMessageService;
         private readonly string _masterKey;
 
         public WorkstationIntegrationTests(WebApplicationFactory<Program> factory)
@@ -49,6 +51,7 @@ namespace Sayra.Backend.IntegrationTests
             _cryptoService = _factory.Services.GetRequiredService<ICryptographicService>();
             _redisService = _factory.Services.GetRequiredService<IRedisService>();
             _connectionRegistry = _factory.Services.GetRequiredService<ITcpConnectionRegistry>();
+            _secureMessageService = _factory.Services.GetRequiredService<ISecureMessageService>();
         }
 
         #region Helper Methods
@@ -75,6 +78,7 @@ namespace Sayra.Backend.IntegrationTests
                 _authService,
                 _cryptoService,
                 _redisService,
+                _secureMessageService,
                 serverOpts,
                 tlsOpts,
                 serverLogger,

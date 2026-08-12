@@ -18,6 +18,7 @@ using Sayra.Backend.Domain;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Infrastructure.Security;
 using Sayra.Backend.Infrastructure.Transport;
@@ -31,6 +32,7 @@ namespace Sayra.Backend.IntegrationTests
         private readonly ICryptographicService _cryptoService;
         private readonly IRedisService _redisService;
         private readonly ITcpConnectionRegistry _connectionRegistry;
+        private readonly ISecureMessageService _secureMessageService;
         private readonly string _masterKey;
 
         public HandshakeAndSecurityTests(WebApplicationFactory<Program> factory)
@@ -45,6 +47,7 @@ namespace Sayra.Backend.IntegrationTests
             _cryptoService = _factory.Services.GetRequiredService<ICryptographicService>();
             _redisService = _factory.Services.GetRequiredService<IRedisService>();
             _connectionRegistry = _factory.Services.GetRequiredService<ITcpConnectionRegistry>();
+            _secureMessageService = _factory.Services.GetRequiredService<ISecureMessageService>();
 
             // Seed test workstations to database so they are authorized during handshake tests
             using (var scope = _factory.Services.CreateScope())
@@ -102,6 +105,7 @@ namespace Sayra.Backend.IntegrationTests
                 _authService,
                 _cryptoService,
                 _redisService,
+                _secureMessageService,
                 serverOpts,
                 tlsOpts,
                 serverLogger);
@@ -469,7 +473,7 @@ namespace Sayra.Backend.IntegrationTests
                 byte[] computedSignature = _cryptoService.ComputeHmacSha256(Encoding.UTF8.GetBytes(signatureInput), sessionKey);
                 string signatureBase64 = Convert.ToBase64String(computedSignature);
 
-                var envelope = new SecureMessageEnvelope
+                var envelope = new Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope
                 {
                     Payload = payloadBase64,
                     Signature = signatureBase64,
@@ -538,7 +542,7 @@ namespace Sayra.Backend.IntegrationTests
                 // Tamper with payload after signature generation
                 string tamperedPayloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("TAMPERED_JUNK_PAYLOAD_HERE_123456789"));
 
-                var envelope = new SecureMessageEnvelope
+                var envelope = new Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope
                 {
                     Payload = tamperedPayloadBase64,
                     Signature = Convert.ToBase64String(computedSignature),
@@ -604,7 +608,7 @@ namespace Sayra.Backend.IntegrationTests
                 string signatureInput = payloadBase64 + "|" + staleTimestampIso;
                 byte[] computedSignature = _cryptoService.ComputeHmacSha256(Encoding.UTF8.GetBytes(signatureInput), sessionKey);
 
-                var envelope = new SecureMessageEnvelope
+                var envelope = new Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope
                 {
                     Payload = payloadBase64,
                     Signature = Convert.ToBase64String(computedSignature),
