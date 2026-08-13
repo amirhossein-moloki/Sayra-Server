@@ -143,7 +143,9 @@ namespace Sayra.Backend.Infrastructure.Security
                             Hostname = connection.Hostname,
                             SiteId = connection.SiteId,
                             ClientVersion = connection.ClientVersion,
-                            AuthenticatedAt = DateTime.UtcNow
+                            AuthenticatedAt = DateTime.UtcNow,
+                            ConnectedAt = DateTime.UtcNow,
+                            LastActivity = DateTime.UtcNow
                         };
                         await _redisService.SetAsync(redisKey, metadata, TimeSpan.FromHours(24));
                     }
@@ -270,5 +272,7 @@ namespace Sayra.Backend.Infrastructure.Security
         public string? SiteId { get; set; }
         public string? ClientVersion { get; set; }
         public DateTime AuthenticatedAt { get; set; }
+        public DateTime ConnectedAt { get; set; }
+        public DateTime LastActivity { get; set; }
     }
 }

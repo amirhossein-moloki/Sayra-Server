@@ -1,13 +1,17 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -15,6 +19,8 @@ namespace Sayra.Backend.Infrastructure.Transport
     public class UdpDiscoveryServer : IHostedService, IUdpDiscoveryServer, IDisposable
     {
         private readonly DiscoveryOptions _discoveryOptions;
+        private readonly ServerOptions _serverOptions;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<UdpDiscoveryServer> _logger;
         private UdpClient? _udpClient;
         private CancellationTokenSource? _cts;
@@ -24,8 +30,22 @@ namespace Sayra.Backend.Infrastructure.Transport
         public UdpDiscoveryServer(
             IOptions<DiscoveryOptions> discoveryOptions,
             ILogger<UdpDiscoveryServer> logger)
+            : this(discoveryOptions,
+                   Microsoft.Extensions.Options.Options.Create(new ServerOptions()),
+                   new ConfigurationBuilder().Build(),
+                   logger)
+        {
+        }
+
+        public UdpDiscoveryServer(
+            IOptions<DiscoveryOptions> discoveryOptions,
+            IOptions<ServerOptions> serverOptions,
+            IConfiguration configuration,
+            ILogger<UdpDiscoveryServer> logger)
         {
             _discoveryOptions = discoveryOptions?.Value ?? throw new ArgumentNullException(nameof(discoveryOptions));
+            _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -113,13 +133,100 @@ namespace Sayra.Backend.Infrastructure.Transport
                 string payload = Encoding.UTF8.GetString(buffer);
                 _logger.LogInformation("UDP Datagram received from {RemoteEndPoint}: {Payload}", remoteEndPoint, payload);
 
-                // For this stage, we do not implement the complete discovery protocol/responses,
-                // but we establish the reception capability.
+                // Parse payload as JSON
+                using var jsonDoc = JsonDocument.Parse(payload);
+                var root = jsonDoc.RootElement;
+                if (!root.TryGetProperty("type", out var typeProp) || typeProp.GetString() != "DISCOVER_SAYRA_SERVER")
+                {
+                    _logger.LogWarning("Invalid UDP discovery packet type received from {RemoteEndPoint}.", remoteEndPoint);
+                    return;
+                }
+
+                // Parse other fields if needed, like nonce or clientId
+                string clientId = root.TryGetProperty("clientId", out var clientProp) ? clientProp.GetString() ?? "" : "";
+                string nonce = root.TryGetProperty("nonce", out var nonceProp) ? nonceProp.GetString() ?? "" : "";
+
+                // Retrieve master key
+                var masterKey = _configuration["SAYRA_MASTER_KEY"];
+                if (string.IsNullOrEmpty(masterKey))
+                {
+                    _logger.LogError("SAYRA_MASTER_KEY is missing or empty. Cannot process discovery response.");
+                    return;
+                }
+
+                // Settle on Server Properties
+                string serverId = _configuration["SAYRA_SERVER_ID"] ?? "SAYRA-CENTRAL-01";
+                string serverName = _discoveryOptions.ServerName ?? "SAYRA Core Host";
+                string ip = GetLocalIpAddress(remoteEndPoint);
+                int tcpPort = _serverOptions.Port;
+                int apiPort = tcpPort; // Or from some configuration, but the requirement lists tcpPort: 5000 and apiPort: 5000
+                string version = "1.0.0"; // Or from some version configuration
+
+                var now = DateTime.UtcNow;
+                var timestampClean = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second, DateTimeKind.Utc);
+                string timestampStr = timestampClean.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+                // Signature calculation: HMAC-SHA256(MasterKey, serverId + "|" + ip + "|" + tcpPort + "|" + timestamp)
+                string signatureInput = $"{serverId}|{ip}|{tcpPort}|{timestampStr}";
+                byte[] signatureInputBytes = Encoding.UTF8.GetBytes(signatureInput);
+                byte[] masterKeyBytes = Encoding.UTF8.GetBytes(masterKey);
+
+                byte[] signatureBytes;
+                using (var hmac = new HMACSHA256(masterKeyBytes))
+                {
+                    signatureBytes = hmac.ComputeHash(signatureInputBytes);
+                }
+                string signatureBase64 = Convert.ToBase64String(signatureBytes);
+
+                // Prepare DiscoveryResponse
+                var response = new DiscoveryResponse
+                {
+                    Type = "SAYRA_SERVER_RESPONSE",
+                    ServerId = serverId,
+                    ServerName = serverName,
+                    Ip = ip,
+                    TcpPort = tcpPort,
+                    ApiPort = apiPort,
+                    Version = version,
+                    Timestamp = timestampClean,
+                    Nonce = string.IsNullOrEmpty(nonce) ? Guid.NewGuid().ToString() : nonce,
+                    Signature = signatureBase64
+                };
+
+                string responseJson = ProtocolSerialization.Serialize(response);
+                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+
+                _udpClient!.Send(responseBytes, responseBytes.Length, remoteEndPoint);
+
+                _logger.LogInformation("Sent SAYRA_SERVER_RESPONSE to {RemoteEndPoint} with IP {IP}.", remoteEndPoint, ip);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse malformed JSON UDP datagram from {RemoteEndPoint}. Service is resilient and will continue.", remoteEndPoint);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to parse or process UDP datagram from {RemoteEndPoint}. Service is resilient and will continue.", remoteEndPoint);
+                _logger.LogError(ex, "Failed to process UDP datagram from {RemoteEndPoint}. Service is resilient and will continue.", remoteEndPoint);
             }
+        }
+
+        private string GetLocalIpAddress(IPEndPoint remoteEndPoint)
+        {
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                socket.Connect(remoteEndPoint);
+                if (socket.LocalEndPoint is IPEndPoint localEndPoint)
+                {
+                    return localEndPoint.Address.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to resolve outbound interface IP using connect routing lookup.");
+            }
+
+            return "127.0.0.1";
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)

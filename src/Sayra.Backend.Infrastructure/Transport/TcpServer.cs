@@ -344,7 +344,79 @@ namespace Sayra.Backend.Infrastructure.Transport
 
             _logger.LogDebug("Successfully processed secure message frame from {ConnectionId}.", connection.ConnectionId);
 
-            // Payload is decrypted and validated. Further stages will route this decrypted payload.
+            // Payload is decrypted and validated. Route HEARTBEAT to handle active connection update and PONG response.
+            string? plaintext = validationResult.PlaintextPayload;
+            if (!string.IsNullOrEmpty(plaintext))
+            {
+                using var doc = JsonDocument.Parse(plaintext);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("type", out var typeProp))
+                {
+                    string msgType = typeProp.GetString() ?? "";
+                    if (msgType.Equals("HEARTBEAT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation("Processing HEARTBEAT for connection {ConnectionId}...", connection.ConnectionId);
+
+                        // 1. Update LastActivity in connection object
+                        connection.LastActivity = DateTime.UtcNow;
+
+                        // 2. Update/Refresh active connection metadata in Redis
+                        try
+                        {
+                            if (Guid.TryParse(connection.ConnectionId, out var connectionGuid))
+                            {
+                                var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
+                                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Security.ConnectionStateMetadata>(redisKey);
+                                if (cachedState != null)
+                                {
+                                    cachedState.LastActivity = DateTime.UtcNow;
+                                    await _redisService.SetAsync(redisKey, cachedState, TimeSpan.FromHours(24));
+                                    _logger.LogDebug("Refreshed Redis connection session for {ConnectionId}.", connection.ConnectionId);
+                                }
+                            }
+                        }
+                        catch (Exception redisEx)
+                        {
+                            _logger.LogWarning(redisEx, "Failed to update connection lastActivity in Redis for {ConnectionId}.", connection.ConnectionId);
+                        }
+
+                        // 3. Update workstation's LastSeen in Postgres database
+                        if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
+                        {
+                            try
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
+                                var pcIdUpper = connection.PcId.Trim().ToUpperInvariant();
+                                var workstation = dbContext.Workstations.FirstOrDefault(w => w.PcId == pcIdUpper);
+                                if (workstation != null)
+                                {
+                                    workstation.LastSeen = DateTime.UtcNow;
+                                    workstation.Status = "Online";
+                                    await dbContext.SaveChangesAsync(cancellationToken);
+                                    _logger.LogDebug("Updated workstation LastSeen in database for PC-ID {PcId}.", connection.PcId);
+                                }
+                            }
+                            catch (Exception dbEx)
+                            {
+                                _logger.LogWarning(dbEx, "Failed to update workstation LastSeen in DB for {PcId}.", connection.PcId);
+                            }
+                        }
+
+                        // 4. Send back a post-authentication PONG message
+                        var pongMessage = new Sayra.Backend.Contracts.PongMessage
+                        {
+                            Type = "PONG",
+                            Timestamp = DateTime.UtcNow
+                        };
+
+                        // Use ISecureMessageService.SendSecureMessageAsync to send the encrypted response
+                        await _secureMessageService.SendSecureMessageAsync(session, pongMessage);
+                        _logger.LogInformation("Sent PONG back to connection {ConnectionId}.", connection.ConnectionId);
+                    }
+                }
+            }
+
             await Task.CompletedTask;
         }
 

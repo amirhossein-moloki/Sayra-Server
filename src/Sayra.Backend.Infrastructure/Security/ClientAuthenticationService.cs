@@ -204,7 +204,8 @@ namespace Sayra.Backend.Infrastructure.Security
                     ConnectionId = connection.ConnectionId,
                     SiteId = response.SiteId ?? string.Empty,
                     Hostname = response.Hostname ?? string.Empty,
-                    ClientVersion = response.ClientVersion ?? string.Empty
+                    ClientVersion = response.ClientVersion ?? string.Empty,
+                    IpAddress = connection.RemoteIpAddress ?? "127.0.0.1"
                 }, cancellationToken);
 
                 if (!bindResult.IsSuccess)

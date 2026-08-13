@@ -61,6 +61,23 @@ namespace Sayra.Backend.Application.Workstations
             workstation.TransitionTo("Online");
             workstation.LastSeen = DateTime.UtcNow;
 
+            if (!string.IsNullOrEmpty(command.IpAddress))
+            {
+                workstation.IpAddress = command.IpAddress;
+            }
+            if (!string.IsNullOrEmpty(command.ClientVersion))
+            {
+                workstation.ClientVersion = command.ClientVersion;
+            }
+            if (!string.IsNullOrEmpty(command.Hostname))
+            {
+                workstation.Hostname = command.Hostname;
+            }
+            if (!string.IsNullOrEmpty(command.SiteId))
+            {
+                workstation.SiteId = command.SiteId;
+            }
+
             _workstationRepository.Update(workstation);
 
             // 4. Log CLIENT_CONNECTED audit event
