@@ -45,7 +45,7 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(w => w.Status)
                 .IsRequired()
                 .HasMaxLength(50)
-                .HasDefaultValue("Offline");
+                .HasDefaultValue("OFFLINE");
 
             builder.Property(w => w.LastSeen)
                 .IsRequired();
@@ -53,6 +53,12 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(w => w.IsDisabled)
                 .IsRequired()
                 .HasDefaultValue(false);
+
+            builder.Property(w => w.IsProvisioned)
+                .IsRequired()
+                .HasDefaultValue(false);
+
+            builder.Property(w => w.ProvisionedAt);
 
             builder.Property(w => w.VerificationPublicKey)
                 .HasColumnType("bytea");
