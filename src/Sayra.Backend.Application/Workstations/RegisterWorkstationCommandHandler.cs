@@ -13,34 +13,48 @@ namespace Sayra.Backend.Application.Workstations
     public class RegisterWorkstationCommandHandler : ICommandHandler<RegisterWorkstationCommand, Workstation>
     {
         private readonly IRepository<Workstation> _workstationRepository;
+        private readonly IRepository<Site> _siteRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public RegisterWorkstationCommandHandler(
             IRepository<Workstation> workstationRepository,
+            IRepository<Site> siteRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
-            _workstationRepository = workstationRepository;
-            _auditEventRepository = auditEventRepository;
-            _unitOfWork = unitOfWork;
+            _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
+            _siteRepository = siteRepository ?? throw new ArgumentNullException(nameof(siteRepository));
+            _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
         public async Task<Result<Workstation>> HandleAsync(RegisterWorkstationCommand command, CancellationToken cancellationToken = default)
         {
             try
             {
-                // Validate & Normalize using domain entity rules
-                var pcIdUpper = (command.PcId ?? string.Empty).Trim().ToUpperInvariant();
-                var macNormalized = (command.MacAddress ?? string.Empty).Trim().ToUpperInvariant().Replace("-", ":");
-
-                if (string.IsNullOrWhiteSpace(pcIdUpper))
+                // 1. Fluent Validation
+                var validator = new RegisterWorkstationCommandValidator();
+                var validationResult = await validator.ValidateAsync(command, cancellationToken);
+                if (!validationResult.IsValid)
                 {
-                    return Result<Workstation>.Failure("INVALID_PC_ID", "PcId is required.");
+                    var firstError = validationResult.Errors.First();
+                    return Result<Workstation>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
                 }
 
-                // MAC Address Uniqueness Check
-                // "MAC address handling must prevent accidental duplicate workstation identities where the business rule requires uniqueness."
+                var pcIdUpper = command.PcId.Trim().ToUpperInvariant();
+                var macNormalized = command.MacAddress.Trim().ToUpperInvariant().Replace("-", ":");
+                var siteIdNormalized = command.SiteId.Trim().ToUpperInvariant();
+
+                // 2. Validate Site existence
+                var allSites = await _siteRepository.GetAllAsync(track: false, cancellationToken);
+                var siteExists = allSites.Any(s => s.SiteId.Equals(siteIdNormalized, StringComparison.OrdinalIgnoreCase));
+                if (!siteExists)
+                {
+                    return Result<Workstation>.Failure("INVALID_SITE_ID", $"Site with ID '{command.SiteId}' does not exist.");
+                }
+
+                // 3. MAC Address Uniqueness Check
                 var allWorkstations = await _workstationRepository.GetAllAsync(track: false, cancellationToken);
                 var duplicateMacWs = allWorkstations.FirstOrDefault(w => w.MacAddress.Equals(macNormalized, StringComparison.OrdinalIgnoreCase));
                 if (duplicateMacWs != null && !duplicateMacWs.PcId.Equals(pcIdUpper, StringComparison.OrdinalIgnoreCase))
@@ -60,12 +74,13 @@ namespace Sayra.Backend.Application.Workstations
                         return Result<Workstation>.Failure("NOT_FOUND", "Workstation not found.");
                     }
 
-                    tracked.SiteId = command.SiteId ?? string.Empty;
-                    tracked.Hostname = command.Hostname ?? string.Empty;
-                    tracked.MacAddress = command.MacAddress ?? string.Empty;
-                    tracked.IpAddress = command.IpAddress ?? string.Empty;
-                    tracked.ClientVersion = command.ClientVersion ?? string.Empty;
-                    tracked.OsVersion = command.OsVersion ?? string.Empty;
+                    // Administrative fields are updated, but we preserve PcId (which is immutable) and IsProvisioned/IsDisabled state
+                    tracked.SiteId = command.SiteId;
+                    tracked.Hostname = command.Hostname;
+                    tracked.MacAddress = command.MacAddress;
+                    tracked.IpAddress = command.IpAddress;
+                    tracked.ClientVersion = command.ClientVersion;
+                    tracked.OsVersion = command.OsVersion;
                     tracked.LastSeen = DateTime.UtcNow;
 
                     tracked.NormalizeAndValidate();
@@ -74,18 +89,20 @@ namespace Sayra.Backend.Application.Workstations
                 }
                 else
                 {
-                    // Create new workstation
+                    // Create new workstation - Initial state is OFFLINE
                     workstation = new Workstation
                     {
-                        PcId = command.PcId ?? string.Empty,
-                        SiteId = command.SiteId ?? string.Empty,
-                        Hostname = command.Hostname ?? string.Empty,
-                        MacAddress = command.MacAddress ?? string.Empty,
-                        IpAddress = command.IpAddress ?? string.Empty,
-                        ClientVersion = command.ClientVersion ?? string.Empty,
-                        OsVersion = command.OsVersion ?? string.Empty,
-                        Status = "Online", // Initial status on registration
-                        LastSeen = DateTime.UtcNow
+                        PcId = command.PcId,
+                        SiteId = command.SiteId,
+                        Hostname = command.Hostname,
+                        MacAddress = command.MacAddress,
+                        IpAddress = command.IpAddress,
+                        ClientVersion = command.ClientVersion,
+                        OsVersion = command.OsVersion,
+                        Status = "OFFLINE", // Initial state on registration must be OFFLINE
+                        LastSeen = DateTime.UtcNow,
+                        IsProvisioned = false,
+                        IsDisabled = false
                     };
 
                     workstation.NormalizeAndValidate();

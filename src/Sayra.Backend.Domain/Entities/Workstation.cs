@@ -14,34 +14,62 @@ namespace Sayra.Backend.Domain
         public string MacAddress { get; set; } = string.Empty;
         public string ClientVersion { get; set; } = string.Empty;
         public string OsVersion { get; set; } = string.Empty;
-        public string Status { get; set; } = "Offline"; // e.g. Offline, Online, InUse, Maintenance
+        public string Status { get; set; } = "OFFLINE"; // Supported: UNKNOWN, OFFLINE, ONLINE, LOCKED, IN_USE, MAINTENANCE
         public DateTime LastSeen { get; set; } = DateTime.UtcNow;
         public byte[]? VerificationPublicKey { get; set; }
         public bool IsDisabled { get; set; }
+        public bool IsProvisioned { get; set; }
+        public DateTime? ProvisionedAt { get; set; }
 
         // Optimistic concurrency token
         public uint RowVersion { get; set; }
 
         public void TransitionTo(string newStatus)
         {
-            if (newStatus == Status) return;
+            var target = (newStatus ?? string.Empty).Trim().ToUpperInvariant();
+            var current = (Status ?? string.Empty).Trim().ToUpperInvariant();
 
-            if (newStatus != "Offline" && newStatus != "Online" && newStatus != "InUse" && newStatus != "Maintenance")
+            if (target == current) return;
+
+            if (target != "UNKNOWN" && target != "OFFLINE" && target != "ONLINE" && target != "LOCKED" && target != "IN_USE" && target != "MAINTENANCE")
             {
                 throw new InvalidDomainException("INVALID_STATUS", $"Invalid status: {newStatus}");
             }
 
-            if (Status == "Offline" && newStatus == "InUse")
+            bool isValid = false;
+
+            switch (current)
             {
-                throw new InvalidDomainException("INVALID_TRANSITION", "Cannot transition directly from Offline to InUse. Workstation must be Online first.");
+                case "UNKNOWN":
+                    isValid = (target == "OFFLINE");
+                    break;
+                case "OFFLINE":
+                    isValid = (target == "ONLINE");
+                    break;
+                case "ONLINE":
+                    isValid = (target == "IN_USE" || target == "LOCKED" || target == "MAINTENANCE" || target == "OFFLINE");
+                    break;
+                case "IN_USE":
+                    isValid = (target == "ONLINE" || target == "MAINTENANCE" || target == "OFFLINE");
+                    break;
+                case "LOCKED":
+                    isValid = (target == "ONLINE" || target == "OFFLINE");
+                    break;
+                case "MAINTENANCE":
+                    isValid = (target == "ONLINE" || target == "OFFLINE");
+                    break;
+                default:
+                    // If stored state was some custom string, allow transitioning to OFFLINE to recover
+                    isValid = (target == "OFFLINE");
+                    break;
             }
 
-            if (Status == "Maintenance" && newStatus == "InUse")
+            if (!isValid)
             {
-                throw new InvalidDomainException("INVALID_TRANSITION", "Cannot transition directly from Maintenance to InUse. Workstation must be Online first.");
+                throw new InvalidDomainException("INVALID_TRANSITION", $"Cannot transition directly from {current} to {target}.");
             }
 
-            Status = newStatus;
+            Status = target;
             UpdatedAt = DateTime.UtcNow;
         }
 
