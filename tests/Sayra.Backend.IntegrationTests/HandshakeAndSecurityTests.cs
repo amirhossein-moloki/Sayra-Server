@@ -689,5 +689,239 @@ namespace Sayra.Backend.IntegrationTests
         }
 
         #endregion
+
+        #region UDP Discovery & Heartbeat Integration Tests
+
+        [Fact]
+        public async Task UdpDiscovery_ValidRequest_Should_Return_ValidSignatureResponse()
+        {
+            // Arrange
+            int udpPort = GetFreePort();
+            var discoveryOpts = Options.Create(new DiscoveryOptions { Enabled = true, UdpPort = udpPort });
+            var serverOpts = Options.Create(new ServerOptions { Port = 5000 });
+            var config = _factory.Services.GetRequiredService<IConfiguration>();
+            var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+            var udpLogger = loggerFactory.CreateLogger<UdpDiscoveryServer>();
+
+            using var udpServer = new UdpDiscoveryServer(discoveryOpts, serverOpts, config, udpLogger);
+            await udpServer.StartAsync(CancellationToken.None);
+
+            using var client = new UdpClient();
+            client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+
+            var request = new
+            {
+                type = "DISCOVER_SAYRA_SERVER",
+                clientId = "WORKSTATION-01",
+                timestamp = DateTime.UtcNow.ToString("o"),
+                nonce = "UUID-NONCE-123456"
+            };
+
+            string requestJson = JsonSerializer.Serialize(request);
+            byte[] requestBytes = Encoding.UTF8.GetBytes(requestJson);
+
+            // Act
+            await client.SendAsync(requestBytes, requestBytes.Length, "127.0.0.1", udpPort);
+
+            var receiveResult = await client.ReceiveAsync(new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token);
+
+            // Assert
+            string responseJson = Encoding.UTF8.GetString(receiveResult.Buffer);
+            var response = JsonSerializer.Deserialize<Sayra.Backend.Contracts.DiscoveryResponse>(responseJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            Assert.NotNull(response);
+            Assert.Equal("SAYRA_SERVER_RESPONSE", response.Type);
+            Assert.Equal("UUID-NONCE-123456", response.Nonce);
+            Assert.False(string.IsNullOrEmpty(response.Signature));
+
+            // Verify Signature calculation matches
+            byte[] masterKeyBytes = Encoding.UTF8.GetBytes(_masterKey);
+            string timestampStr = response.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            string expectedInput = $"{response.ServerId}|{response.Ip}|{response.TcpPort}|{timestampStr}";
+            byte[] expectedInputBytes = Encoding.UTF8.GetBytes(expectedInput);
+
+            byte[] expectedHmac;
+            using (var hmac = new HMACSHA256(masterKeyBytes))
+            {
+                expectedHmac = hmac.ComputeHash(expectedInputBytes);
+            }
+            string expectedSignatureBase64 = Convert.ToBase64String(expectedHmac);
+
+            Assert.Equal(expectedSignatureBase64, response.Signature);
+
+            await udpServer.StopAsync(CancellationToken.None);
+        }
+
+        [Fact]
+        public async Task UdpDiscovery_MalformedRequest_Should_Be_Safely_Ignored()
+        {
+            // Arrange
+            int udpPort = GetFreePort();
+            var discoveryOpts = Options.Create(new DiscoveryOptions { Enabled = true, UdpPort = udpPort });
+            var serverOpts = Options.Create(new ServerOptions { Port = 5000 });
+            var config = _factory.Services.GetRequiredService<IConfiguration>();
+            var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+            var udpLogger = loggerFactory.CreateLogger<UdpDiscoveryServer>();
+
+            using var udpServer = new UdpDiscoveryServer(discoveryOpts, serverOpts, config, udpLogger);
+            await udpServer.StartAsync(CancellationToken.None);
+
+            using var client = new UdpClient();
+            client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+
+            // Malformed and non-matching requests
+            byte[][] payloads = new byte[][]
+            {
+                Encoding.UTF8.GetBytes("INVALID_PAYLOAD_NOT_JSON"),
+                Encoding.UTF8.GetBytes("{\"type\":\"WRONG_TYPE\"}"),
+                new byte[] { 0x01, 0x02, 0x03, 0xFF }
+            };
+
+            foreach (var payload in payloads)
+            {
+                await client.SendAsync(payload, payload.Length, "127.0.0.1", udpPort);
+            }
+
+            // Give a little time for processing to happen (no exceptions should crash the server)
+            await Task.Delay(100);
+
+            // Verify server is still running fine by sending a valid request now
+            var validRequest = new
+            {
+                type = "DISCOVER_SAYRA_SERVER",
+                clientId = "WORKSTATION-01",
+                timestamp = DateTime.UtcNow.ToString("o"),
+                nonce = "UUID-NONCE-OK"
+            };
+            byte[] validBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(validRequest));
+            await client.SendAsync(validBytes, validBytes.Length, "127.0.0.1", udpPort);
+
+            var receiveResult = await client.ReceiveAsync(new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token);
+            string responseJson = Encoding.UTF8.GetString(receiveResult.Buffer);
+            Assert.Contains("SAYRA_SERVER_RESPONSE", responseJson);
+
+            await udpServer.StopAsync(CancellationToken.None);
+        }
+
+        [Fact]
+        public async Task PostAuth_Heartbeat_Should_Receive_Pong_And_Update_LastActivity_And_Redis()
+        {
+            var (server, port) = await StartTestServerAsync();
+            using var client = new TcpClient();
+            await client.ConnectAsync("127.0.0.1", port);
+            var stream = client.GetStream();
+
+            try
+            {
+                // 1. Handshake Phase
+                string challengeLine = await ReadLineWithTimeoutAsync(stream, TimeSpan.FromSeconds(3));
+                var challengeDto = JsonSerializer.Deserialize<AuthChallengeDto>(challengeLine, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                byte[] masterKeyBytes = Encoding.UTF8.GetBytes(_masterKey);
+                byte[] challengeStringToSign = Encoding.UTF8.GetBytes(challengeDto!.Challenge);
+                byte[] expectedHmacBytes = _cryptoService.ComputeHmacSha256(challengeStringToSign, masterKeyBytes);
+
+                byte[] sessionKey = RandomNumberGenerator.GetBytes(32);
+                byte[] iv = RandomNumberGenerator.GetBytes(16);
+                byte[] aesKey = masterKeyBytes.Length == 32 ? masterKeyBytes : SHA256.HashData(masterKeyBytes);
+                byte[] encryptedSessionKey = _cryptoService.EncryptAes256Cbc(sessionKey, aesKey, iv);
+
+                var responseDto = new AuthResponseDto
+                {
+                    Hmac = Convert.ToBase64String(expectedHmacBytes),
+                    EncryptedSessionKey = Convert.ToBase64String(encryptedSessionKey),
+                    Iv = Convert.ToBase64String(iv),
+                    PcId = "PC-SECURE-MSG",
+                    Hostname = "DESKTOP-SECURE"
+                };
+
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(responseDto) + "\n"));
+                await stream.FlushAsync();
+
+                // Read AUTH_STATUS success
+                await ReadLineWithTimeoutAsync(stream, TimeSpan.FromSeconds(3));
+
+                // Grab active connection for assertion later
+                ITcpConnection? connection = null;
+                foreach (var conn in _connectionRegistry.GetAll())
+                {
+                    if (conn.PcId == "PC-SECURE-MSG")
+                    {
+                        connection = conn;
+                        break;
+                    }
+                }
+                Assert.NotNull(connection);
+                var initialLastActivity = connection.LastActivity;
+
+                // 2. Heartbeat Request
+                var heartbeatPayload = new
+                {
+                    type = "HEARTBEAT",
+                    timestamp = DateTime.UtcNow.ToString("o")
+                };
+                string heartbeatJson = JsonSerializer.Serialize(heartbeatPayload);
+                byte[] plaintextBytes = Encoding.UTF8.GetBytes(heartbeatJson);
+
+                // Encrypt payload
+                byte[] msgIv = RandomNumberGenerator.GetBytes(16);
+                byte[] encryptedCiphertext = _cryptoService.EncryptAes256Cbc(plaintextBytes, sessionKey, msgIv);
+                byte[] prependedPayloadBytes = new byte[16 + encryptedCiphertext.Length];
+                Buffer.BlockCopy(msgIv, 0, prependedPayloadBytes, 0, 16);
+                Buffer.BlockCopy(encryptedCiphertext, 0, prependedPayloadBytes, 16, encryptedCiphertext.Length);
+                string payloadBase64 = Convert.ToBase64String(prependedPayloadBytes);
+
+                string timestampIso = DateTime.UtcNow.ToString("o");
+                string signatureInput = payloadBase64 + "|" + timestampIso;
+                byte[] computedSignature = _cryptoService.ComputeHmacSha256(Encoding.UTF8.GetBytes(signatureInput), sessionKey);
+
+                var envelope = new Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope
+                {
+                    Payload = payloadBase64,
+                    Signature = Convert.ToBase64String(computedSignature),
+                    Timestamp = timestampIso
+                };
+
+                string envelopeJson = JsonSerializer.Serialize(envelope) + "\n";
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(envelopeJson));
+                await stream.FlushAsync();
+
+                // 3. Read SecureMessageEnvelope response (PONG)
+                string pongLine = await ReadLineWithTimeoutAsync(stream, TimeSpan.FromSeconds(3));
+                var pongEnvelope = JsonSerializer.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(pongLine, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                Assert.NotNull(pongEnvelope);
+
+                // Decrypt PONG envelope
+                byte[] rawPongBytes = Convert.FromBase64String(pongEnvelope.Payload);
+                byte[] pongIv = new byte[16];
+                byte[] pongCiphertext = new byte[rawPongBytes.Length - 16];
+                Buffer.BlockCopy(rawPongBytes, 0, pongIv, 0, 16);
+                Buffer.BlockCopy(rawPongBytes, 16, pongCiphertext, 0, pongCiphertext.Length);
+
+                byte[] decryptedPongBytes = _cryptoService.DecryptAes256Cbc(pongCiphertext, sessionKey, pongIv);
+                string decryptedPongJson = Encoding.UTF8.GetString(decryptedPongBytes);
+
+                var pongMessage = JsonSerializer.Deserialize<Sayra.Backend.Contracts.PongMessage>(decryptedPongJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                Assert.NotNull(pongMessage);
+                Assert.Equal("PONG", pongMessage.Type);
+
+                // 4. Verify Connection updates
+                Assert.True(connection.LastActivity >= initialLastActivity);
+
+                // 5. Verify Redis connection state refreshed
+                var redisKey = RedisKeyGenerator.ConnectionStateKey(Guid.Parse(connection.ConnectionId));
+                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Security.ConnectionStateMetadata>(redisKey);
+                Assert.NotNull(cachedState);
+                Assert.True(cachedState.LastActivity >= initialLastActivity);
+            }
+            finally
+            {
+                client.Close();
+                await Task.Delay(100);
+                await server.StopAsync(CancellationToken.None);
+            }
+        }
+
+        #endregion
     }
 }

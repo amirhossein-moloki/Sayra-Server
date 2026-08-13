@@ -20,6 +20,7 @@ namespace Sayra.Backend.Infrastructure.Transport
             _tcpClient = tcpClient ?? throw new ArgumentNullException(nameof(tcpClient));
             _stream = stream ?? throw new ArgumentNullException(nameof(stream));
             _state = ConnectionLifecycleState.Connecting;
+            LastActivity = DateTime.UtcNow;
         }
 
         public string ConnectionId { get; }
@@ -31,6 +32,26 @@ namespace Sayra.Backend.Infrastructure.Transport
         public string? Hostname { get; set; }
         public string? SiteId { get; set; }
         public string? ClientVersion { get; set; }
+        public DateTime LastActivity { get; set; }
+
+        public string? RemoteIpAddress
+        {
+            get
+            {
+                try
+                {
+                    if (_tcpClient.Client.RemoteEndPoint is System.Net.IPEndPoint ipEndPoint)
+                    {
+                        return ipEndPoint.Address.ToString();
+                    }
+                }
+                catch
+                {
+                    // Ignore and fall back
+                }
+                return null;
+            }
+        }
 
         public Stream GetStream()
         {

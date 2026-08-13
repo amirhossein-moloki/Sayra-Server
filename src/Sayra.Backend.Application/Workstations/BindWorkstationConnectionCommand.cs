@@ -10,5 +10,6 @@ namespace Sayra.Backend.Application.Workstations
         public string SiteId { get; set; } = string.Empty;
         public string Hostname { get; set; } = string.Empty;
         public string ClientVersion { get; set; } = string.Empty;
+        public string IpAddress { get; set; } = string.Empty;
     }
 }

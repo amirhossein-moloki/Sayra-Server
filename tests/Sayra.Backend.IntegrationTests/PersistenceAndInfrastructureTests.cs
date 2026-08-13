@@ -30,6 +30,11 @@ namespace Sayra.Backend.IntegrationTests
             using var scope = _factory.Services.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+            var randomBytes = new byte[6];
+            Random.Shared.NextBytes(randomBytes);
+            randomBytes[0] = (byte)(randomBytes[0] & 0xFE | 0x02); // set local bit
+            var uniqueMacAddress = string.Join(":", randomBytes.Select(b => b.ToString("X2")));
+
             var workstation = new Workstation
             {
                 PcId = $"PC-UNIT-{Guid.NewGuid():N}",
@@ -37,7 +42,7 @@ namespace Sayra.Backend.IntegrationTests
                 SiteId = "SITE-ALPHA",
                 Hostname = "DESKTOP-UNIT-01",
                 IpAddress = "192.168.1.1",
-                MacAddress = $"00:1A:2B:3C:4D:{Random.Shared.Next(10, 99)}",
+                MacAddress = uniqueMacAddress,
                 Status = "Online",
                 LastSeen = DateTime.UtcNow
             };
@@ -132,6 +137,11 @@ namespace Sayra.Backend.IntegrationTests
             using var scope = _factory.Services.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+            var randomBytes = new byte[6];
+            Random.Shared.NextBytes(randomBytes);
+            randomBytes[0] = (byte)(randomBytes[0] & 0xFE | 0x02); // set local bit
+            var uniqueMacAddress = string.Join(":", randomBytes.Select(b => b.ToString("X2")));
+
             var workstation = new Workstation
             {
                 PcId = $"PC-TX-{Guid.NewGuid():N}",
@@ -139,7 +149,7 @@ namespace Sayra.Backend.IntegrationTests
                 SiteId = "SITE-BETA",
                 Hostname = "DESKTOP-TX-01",
                 IpAddress = "10.0.0.1",
-                MacAddress = $"AA:BB:CC:DD:EE:{Random.Shared.Next(10, 99)}",
+                MacAddress = uniqueMacAddress,
                 Status = "Offline",
                 LastSeen = DateTime.UtcNow
             };
