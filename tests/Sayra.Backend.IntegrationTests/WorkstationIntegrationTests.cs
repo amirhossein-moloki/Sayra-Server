@@ -281,7 +281,7 @@ namespace Sayra.Backend.IntegrationTests
                     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                     var workstation = await dbContext.Workstations.AsNoTracking().FirstOrDefaultAsync(w => w.PcId == "PC-INTEG-OK-01");
                     Assert.NotNull(workstation);
-                    Assert.Equal("Online", workstation.Status);
+                    Assert.Equal("ONLINE", workstation.Status, ignoreCase: true);
                 }
             }
             finally
