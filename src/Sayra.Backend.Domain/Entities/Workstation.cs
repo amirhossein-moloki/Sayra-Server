@@ -9,6 +9,9 @@ namespace Sayra.Backend.Domain
         public string Name { get; set; } = string.Empty;
         public string PcId { get; set; } = string.Empty;
         public string SiteId { get; set; } = string.Empty;
+        public Guid? OrganizationEntityId { get; set; }
+        public Guid? SiteEntityId { get; set; }
+        public Guid? ZoneEntityId { get; set; }
         public string Hostname { get; set; } = string.Empty;
         public string IpAddress { get; set; } = string.Empty;
         public string MacAddress { get; set; } = string.Empty;
@@ -18,6 +21,7 @@ namespace Sayra.Backend.Domain
         public DateTime LastSeen { get; set; } = DateTime.UtcNow;
         public byte[]? VerificationPublicKey { get; set; }
         public bool IsDisabled { get; set; }
+        public bool IsDeactivated { get; set; }
         public bool IsProvisioned { get; set; }
         public DateTime? ProvisionedAt { get; set; }
 
