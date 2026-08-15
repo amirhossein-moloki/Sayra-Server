@@ -137,34 +137,34 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void Valid_State_Transitions_Should_Succeed()
         {
-            var workstation = new Workstation { Status = "Offline" };
+            var workstation = new Workstation { Status = "OFFLINE" };
 
-            // Offline -> Online
-            workstation.TransitionTo("Online");
-            Assert.Equal("Online", workstation.Status);
+            // OFFLINE -> ONLINE
+            workstation.TransitionTo("ONLINE");
+            Assert.Equal("ONLINE", workstation.Status);
 
-            // Online -> InUse
-            workstation.TransitionTo("InUse");
-            Assert.Equal("InUse", workstation.Status);
+            // ONLINE -> IN_USE
+            workstation.TransitionTo("IN_USE");
+            Assert.Equal("IN_USE", workstation.Status);
 
-            // InUse -> Maintenance
-            workstation.TransitionTo("Maintenance");
-            Assert.Equal("Maintenance", workstation.Status);
+            // IN_USE -> MAINTENANCE
+            workstation.TransitionTo("MAINTENANCE");
+            Assert.Equal("MAINTENANCE", workstation.Status);
 
-            // Maintenance -> Offline
-            workstation.TransitionTo("Offline");
-            Assert.Equal("Offline", workstation.Status);
+            // MAINTENANCE -> OFFLINE
+            workstation.TransitionTo("OFFLINE");
+            Assert.Equal("OFFLINE", workstation.Status);
         }
 
         [Fact]
         public void Invalid_State_Transitions_Should_Throw_InvalidDomainException()
         {
-            var w1 = new Workstation { Status = "Offline" };
-            var ex1 = Assert.Throws<InvalidDomainException>(() => w1.TransitionTo("InUse"));
+            var w1 = new Workstation { Status = "OFFLINE" };
+            var ex1 = Assert.Throws<InvalidDomainException>(() => w1.TransitionTo("IN_USE"));
             Assert.Equal("INVALID_TRANSITION", ex1.ErrorCode);
 
-            var w2 = new Workstation { Status = "Maintenance" };
-            var ex2 = Assert.Throws<InvalidDomainException>(() => w2.TransitionTo("InUse"));
+            var w2 = new Workstation { Status = "MAINTENANCE" };
+            var ex2 = Assert.Throws<InvalidDomainException>(() => w2.TransitionTo("IN_USE"));
             Assert.Equal("INVALID_TRANSITION", ex2.ErrorCode);
         }
 
@@ -177,13 +177,16 @@ namespace Sayra.Backend.UnitTests
         {
             // Arrange
             var mockRepo = new Mock<IRepository<Workstation>>();
+            var mockSiteRepo = new Mock<IRepository<Site>>();
             var mockAudit = new Mock<IRepository<AuditEvent>>();
             var mockUow = new Mock<IUnitOfWork>();
 
             mockRepo.Setup(r => r.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<Workstation>());
+            mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } });
 
-            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockAudit.Object, mockUow.Object);
+            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
             {
                 PcId = "PC-UNIT-TEST",
@@ -202,7 +205,7 @@ namespace Sayra.Backend.UnitTests
             Assert.True(result.IsSuccess);
             Assert.NotNull(result.Value);
             Assert.Equal("PC-UNIT-TEST", result.Value.PcId);
-            Assert.Equal("Online", result.Value.Status);
+            Assert.Equal("OFFLINE", result.Value.Status);
 
             mockRepo.Verify(r => r.AddAsync(It.IsAny<Workstation>(), It.IsAny<CancellationToken>()), Times.Once);
             mockAudit.Verify(a => a.AddAsync(It.IsAny<AuditEvent>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -214,6 +217,7 @@ namespace Sayra.Backend.UnitTests
         {
             // Arrange
             var mockRepo = new Mock<IRepository<Workstation>>();
+            var mockSiteRepo = new Mock<IRepository<Site>>();
             var mockAudit = new Mock<IRepository<AuditEvent>>();
             var mockUow = new Mock<IUnitOfWork>();
 
@@ -228,8 +232,10 @@ namespace Sayra.Backend.UnitTests
 
             mockRepo.Setup(r => r.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<Workstation> { existing });
+            mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } });
 
-            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockAudit.Object, mockUow.Object);
+            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
             {
                 PcId = "PC-NEW-DUPLICATE",
@@ -254,6 +260,7 @@ namespace Sayra.Backend.UnitTests
         {
             // Arrange
             var mockRepo = new Mock<IRepository<Workstation>>();
+            var mockSiteRepo = new Mock<IRepository<Site>>();
             var mockAudit = new Mock<IRepository<AuditEvent>>();
             var mockUow = new Mock<IUnitOfWork>();
 
@@ -274,8 +281,10 @@ namespace Sayra.Backend.UnitTests
                 .ReturnsAsync(new List<Workstation> { existing });
             mockRepo.Setup(r => r.GetByIdAsync(existingId, true, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
+            mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-NEW", Code = "SITE-NEW", Name = "Site New" } });
 
-            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockAudit.Object, mockUow.Object);
+            var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
             {
                 PcId = "PC-SAMENAME",

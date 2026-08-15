@@ -104,7 +104,7 @@ namespace Sayra.Backend.Api
 
                 return 0;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex.GetType().Name != "HostAbortedException")
             {
                 Log.Fatal(ex, "Host terminated unexpectedly");
                 return 1;

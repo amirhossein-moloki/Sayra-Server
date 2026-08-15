@@ -24,6 +24,12 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasMaxLength(100);
 
+            builder.Property(w => w.OrganizationEntityId);
+
+            builder.Property(w => w.SiteEntityId);
+
+            builder.Property(w => w.ZoneEntityId);
+
             builder.Property(w => w.Hostname)
                 .IsRequired()
                 .HasMaxLength(100);
@@ -54,6 +60,10 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasDefaultValue(false);
 
+            builder.Property(w => w.IsDeactivated)
+                .IsRequired()
+                .HasDefaultValue(false);
+
             builder.Property(w => w.IsProvisioned)
                 .IsRequired()
                 .HasDefaultValue(false);
@@ -67,10 +77,29 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRowVersion()
                 .IsConcurrencyToken();
 
+            // Foreign keys
+            builder.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(w => w.OrganizationEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasOne<Site>()
+                .WithMany()
+                .HasForeignKey(w => w.SiteEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasOne<Zone>()
+                .WithMany()
+                .HasForeignKey(w => w.ZoneEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Indexes/Constraints mapping
             builder.HasIndex(w => w.PcId).IsUnique();
             builder.HasIndex(w => w.MacAddress).IsUnique();
             builder.HasIndex(w => w.SiteId);
+            builder.HasIndex(w => w.OrganizationEntityId);
+            builder.HasIndex(w => w.SiteEntityId);
+            builder.HasIndex(w => w.ZoneEntityId);
             builder.HasIndex(w => w.Status);
             builder.HasIndex(w => w.LastSeen);
         }

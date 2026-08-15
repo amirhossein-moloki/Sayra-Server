@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Sayra.Backend.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Sayra.Backend.Infrastructure.Persistence;
 namespace Sayra.Backend.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260815073057_AddWorkstationProvisioningFields")]
+    partial class AddWorkstationProvisioningFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -134,59 +137,12 @@ namespace Sayra.Backend.Infrastructure.Migrations
                     b.ToTable("ConfigurationPackages", (string)null);
                 });
 
-            modelBuilder.Entity("Sayra.Backend.Domain.Organization", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("Active");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.ToTable("Organizations", (string)null);
-                });
-
             modelBuilder.Entity("Sayra.Backend.Domain.Site", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -195,37 +151,43 @@ namespace Sayra.Backend.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("SiteId")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("Active");
-
-                    b.Property<string>("Timezone")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasDefaultValue("UTC");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OrganizationId", "Code")
+                    b.HasIndex("SiteId")
                         .IsUnique();
 
                     b.ToTable("Sites", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("6a9254d3-1823-45a4-966a-1cc12df6992d"),
+                            CreatedAt = new DateTime(2026, 8, 15, 7, 30, 57, 28, DateTimeKind.Utc).AddTicks(8508),
+                            Name = "Site A",
+                            SiteId = "SITE-A"
+                        },
+                        new
+                        {
+                            Id = new Guid("bce0cf94-4d1a-45c5-9f5b-16629dfc29f2"),
+                            CreatedAt = new DateTime(2026, 8, 15, 7, 30, 57, 28, DateTimeKind.Utc).AddTicks(8597),
+                            Name = "Site Alpha",
+                            SiteId = "SITE-ALPHA"
+                        },
+                        new
+                        {
+                            Id = new Guid("7c180905-1a8c-4fdf-973a-4be3a30fc39c"),
+                            CreatedAt = new DateTime(2026, 8, 15, 7, 30, 57, 28, DateTimeKind.Utc).AddTicks(8618),
+                            Name = "Site Beta",
+                            SiteId = "SITE-BETA"
+                        });
                 });
 
             modelBuilder.Entity("Sayra.Backend.Domain.SystemUpdate", b =>
@@ -339,11 +301,6 @@ namespace Sayra.Backend.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<bool>("IsDeactivated")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
-
                     b.Property<bool>("IsDisabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -367,9 +324,6 @@ namespace Sayra.Backend.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<Guid?>("OrganizationEntityId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("OsVersion")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -389,9 +343,6 @@ namespace Sayra.Backend.Infrastructure.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<Guid?>("SiteEntityId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("SiteId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -410,9 +361,6 @@ namespace Sayra.Backend.Infrastructure.Migrations
                     b.Property<byte[]>("VerificationPublicKey")
                         .HasColumnType("bytea");
 
-                    b.Property<Guid?>("ZoneEntityId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("LastSeen");
@@ -420,18 +368,12 @@ namespace Sayra.Backend.Infrastructure.Migrations
                     b.HasIndex("MacAddress")
                         .IsUnique();
 
-                    b.HasIndex("OrganizationEntityId");
-
                     b.HasIndex("PcId")
                         .IsUnique();
-
-                    b.HasIndex("SiteEntityId");
 
                     b.HasIndex("SiteId");
 
                     b.HasIndex("Status");
-
-                    b.HasIndex("ZoneEntityId");
 
                     b.ToTable("Workstations", (string)null);
                 });
@@ -505,87 +447,6 @@ namespace Sayra.Backend.Infrastructure.Migrations
                     b.HasIndex("WorkstationId");
 
                     b.ToTable("WorkstationSessions", (string)null);
-                });
-
-            modelBuilder.Entity("Sayra.Backend.Domain.Zone", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("SiteId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("Active");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ZoneId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SiteId", "Code")
-                        .IsUnique();
-
-                    b.ToTable("Zones", (string)null);
-                });
-
-            modelBuilder.Entity("Sayra.Backend.Domain.Site", b =>
-                {
-                    b.HasOne("Sayra.Backend.Domain.Organization", null)
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Sayra.Backend.Domain.Workstation", b =>
-                {
-                    b.HasOne("Sayra.Backend.Domain.Organization", null)
-                        .WithMany()
-                        .HasForeignKey("OrganizationEntityId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Sayra.Backend.Domain.Site", null)
-                        .WithMany()
-                        .HasForeignKey("SiteEntityId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Sayra.Backend.Domain.Zone", null)
-                        .WithMany()
-                        .HasForeignKey("ZoneEntityId")
-                        .OnDelete(DeleteBehavior.Restrict);
-                });
-
-            modelBuilder.Entity("Sayra.Backend.Domain.Zone", b =>
-                {
-                    b.HasOne("Sayra.Backend.Domain.Site", null)
-                        .WithMany()
-                        .HasForeignKey("SiteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

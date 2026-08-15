@@ -95,12 +95,27 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
             services.AddSingleton<ISecureMessageService, SecureMessageService>();
 
-            // 5. Workstation Command & Query Handlers
+            // 5. Organization, Site, Zone, Workstation Command & Query Handlers
             services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
             services.AddScoped<IQueryHandler<GetWorkstationByPcIdQuery, Workstation?>, GetWorkstationByPcIdQueryHandler>();
             services.AddScoped<ICommandHandler<AuthorizeWorkstationCommand, Workstation>, AuthorizeWorkstationCommandHandler>();
             services.AddScoped<ICommandHandler<BindWorkstationConnectionCommand, Workstation>, BindWorkstationConnectionCommandHandler>();
             services.AddScoped<ICommandHandler<UnbindWorkstationConnectionCommand, Workstation?>, UnbindWorkstationConnectionCommandHandler>();
+
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Organizations.CreateOrganizationCommand, Organization>, Sayra.Backend.Application.Organizations.CreateOrganizationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Organizations.DeactivateOrganizationCommand, Organization>, Sayra.Backend.Application.Organizations.DeactivateOrganizationCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Organizations.GetOrganizationQuery, Organization>, Sayra.Backend.Application.Organizations.GetOrganizationQueryHandler>();
+
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Locations.CreateSiteCommand, Site>, Sayra.Backend.Application.Locations.CreateSiteCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Locations.DeactivateSiteCommand, Site>, Sayra.Backend.Application.Locations.DeactivateSiteCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Locations.GetSiteQuery, Site>, Sayra.Backend.Application.Locations.GetSiteQueryHandler>();
+
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Locations.CreateZoneCommand, Zone>, Sayra.Backend.Application.Locations.CreateZoneCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Locations.DeactivateZoneCommand, Zone>, Sayra.Backend.Application.Locations.DeactivateZoneCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Locations.GetZoneQuery, Zone>, Sayra.Backend.Application.Locations.GetZoneQueryHandler>();
+
+            services.AddScoped<ICommandHandler<AssignWorkstationCommand, Sayra.Backend.Contracts.WorkstationAssignmentResponseDto>, AssignWorkstationCommandHandler>();
+            services.AddScoped<IQueryHandler<GetWorkstationAssignmentQuery, Sayra.Backend.Contracts.WorkstationAssignmentResponseDto>, GetWorkstationAssignmentQueryHandler>();
 
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();

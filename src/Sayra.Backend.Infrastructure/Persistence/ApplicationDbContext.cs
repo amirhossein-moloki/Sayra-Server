@@ -16,7 +16,9 @@ namespace Sayra.Backend.Infrastructure.Persistence
         {
         }
 
+        public DbSet<Organization> Organizations { get; set; } = null!;
         public DbSet<Site> Sites { get; set; } = null!;
+        public DbSet<Zone> Zones { get; set; } = null!;
         public DbSet<Workstation> Workstations { get; set; } = null!;
         public DbSet<WorkstationSession> WorkstationSessions { get; set; } = null!;
         public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
