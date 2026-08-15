@@ -8,8 +8,10 @@ using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Gamers;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Caching;
 using Sayra.Backend.Infrastructure.Transport;
@@ -94,8 +96,9 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
             services.AddSingleton<ISecureMessageService, SecureMessageService>();
+            services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
-            // 5. Organization, Site, Zone, Workstation Command & Query Handlers
+            // 5. Command & Query Handlers
             services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
             services.AddScoped<IQueryHandler<GetWorkstationByPcIdQuery, Workstation?>, GetWorkstationByPcIdQueryHandler>();
             services.AddScoped<ICommandHandler<AuthorizeWorkstationCommand, Workstation>, AuthorizeWorkstationCommandHandler>();
@@ -116,6 +119,15 @@ namespace Sayra.Backend.Infrastructure
 
             services.AddScoped<ICommandHandler<AssignWorkstationCommand, Sayra.Backend.Contracts.WorkstationAssignmentResponseDto>, AssignWorkstationCommandHandler>();
             services.AddScoped<IQueryHandler<GetWorkstationAssignmentQuery, Sayra.Backend.Contracts.WorkstationAssignmentResponseDto>, GetWorkstationAssignmentQueryHandler>();
+
+            // Gamer, GamerCredential & GamerAccount Handlers
+            services.AddScoped<ICommandHandler<CreateGamerCommand, Gamer>, CreateGamerCommandHandler>();
+            services.AddScoped<ICommandHandler<UpdateGamerProfileCommand, Gamer>, UpdateGamerProfileCommandHandler>();
+            services.AddScoped<ICommandHandler<DeactivateGamerCommand, Gamer>, DeactivateGamerCommandHandler>();
+            services.AddScoped<ICommandHandler<ChangeGamerPasswordCommand, bool>, ChangeGamerPasswordCommandHandler>();
+            services.AddScoped<ICommandHandler<AuthenticateGamerCommand, AuthenticateGamerResponseDto>, AuthenticateGamerCommandHandler>();
+            services.AddScoped<IQueryHandler<GetGamerQuery, Gamer>, GetGamerQueryHandler>();
+            services.AddScoped<IQueryHandler<GetGamerAccountQuery, GamerAccount>, GetGamerAccountQueryHandler>();
 
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();

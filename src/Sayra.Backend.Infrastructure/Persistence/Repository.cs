@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +30,18 @@ namespace Sayra.Backend.Infrastructure.Persistence
             else
             {
                 return await _dbSet.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+            }
+        }
+
+        public virtual async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, bool track = true, CancellationToken cancellationToken = default)
+        {
+            if (track)
+            {
+                return await _dbSet.FirstOrDefaultAsync(predicate, cancellationToken);
+            }
+            else
+            {
+                return await _dbSet.AsNoTracking().FirstOrDefaultAsync(predicate, cancellationToken);
             }
         }
 
