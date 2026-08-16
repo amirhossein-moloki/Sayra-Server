@@ -31,6 +31,9 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
         public DbSet<SystemUpdate> SystemUpdates { get; set; } = null!;
+        public DbSet<PricingPlan> PricingPlans { get; set; } = null!;
+        public DbSet<PricingRule> PricingRules { get; set; } = null!;
+        public DbSet<RateSnapshot> RateSnapshots { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

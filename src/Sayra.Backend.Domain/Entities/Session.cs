@@ -10,6 +10,7 @@ namespace Sayra.Backend.Domain
         public Guid WorkstationId { get; set; }
         public Guid GamerId { get; set; }
         public Guid? ReservationId { get; set; }
+        public Guid? PricingPlanId { get; set; }
 
         public string Status { get; set; } = "IDLE";
 
