@@ -155,6 +155,17 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQueryHandler>();
 
+            // Pricing Domain Services & Handlers
+            services.AddScoped<Sayra.Backend.Application.Pricing.IRateResolver, Sayra.Backend.Application.Pricing.RateResolver>();
+            services.AddScoped<Sayra.Backend.Application.Pricing.IRateSnapshotService, Sayra.Backend.Application.Pricing.RateSnapshotService>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Pricing.CreatePricingPlanCommand, PricingPlanResponseDto>, Sayra.Backend.Application.Pricing.CreatePricingPlanCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Pricing.CreatePricingRuleCommand, PricingRuleResponseDto>, Sayra.Backend.Application.Pricing.CreatePricingRuleCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Pricing.ActivatePricingPlanCommand, PricingPlanResponseDto>, Sayra.Backend.Application.Pricing.ActivatePricingPlanCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Pricing.DeactivatePricingPlanCommand, PricingPlanResponseDto>, Sayra.Backend.Application.Pricing.DeactivatePricingPlanCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingPlanQuery, PricingPlanResponseDto>, Sayra.Backend.Application.Pricing.GetPricingPlanQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingRulesQuery, System.Collections.Generic.List<PricingRuleResponseDto>>, Sayra.Backend.Application.Pricing.GetPricingRulesQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.ResolveRateQuery, ResolvedRateResponseDto>, Sayra.Backend.Application.Pricing.ResolveRateQueryHandler>();
+
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
 

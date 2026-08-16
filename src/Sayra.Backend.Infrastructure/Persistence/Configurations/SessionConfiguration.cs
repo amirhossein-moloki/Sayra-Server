@@ -29,6 +29,9 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(s => s.ReservationId)
                 .IsRequired(false);
 
+            builder.Property(s => s.PricingPlanId)
+                .IsRequired(false);
+
             builder.Property(s => s.Status)
                 .IsRequired()
                 .HasMaxLength(20);
@@ -81,6 +84,12 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.HasOne<Reservation>()
                 .WithMany()
                 .HasForeignKey(s => s.ReservationId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            builder.HasOne<PricingPlan>()
+                .WithMany()
+                .HasForeignKey(s => s.PricingPlanId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .IsRequired(false);
         }
