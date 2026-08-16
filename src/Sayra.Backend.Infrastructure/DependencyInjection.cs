@@ -138,6 +138,18 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Reservations.GetReservationQuery, ReservationResponseDto>, Sayra.Backend.Application.Reservations.GetReservationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Reservations.ValidateReservationQuery, ReservationValidationResultDto>, Sayra.Backend.Application.Reservations.ValidateReservationQueryHandler>();
 
+            // Session Handlers & Domain Service
+            services.AddScoped<Sayra.Backend.Application.Sessions.ISessionStateTransitionService, Sayra.Backend.Application.Sessions.SessionStateTransitionService>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.StartSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.StartSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.PauseSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.PauseSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.ResumeSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.ResumeSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.StopSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.StopSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.CancelSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.CancelSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.TerminateSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.TerminateSessionCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionQuery, SessionResponseDto>, Sayra.Backend.Application.Sessions.GetSessionQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQueryHandler>();
+
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
 

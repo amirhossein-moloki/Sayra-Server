@@ -21,6 +21,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<Zone> Zones { get; set; } = null!;
         public DbSet<Workstation> Workstations { get; set; } = null!;
         public DbSet<WorkstationSession> WorkstationSessions { get; set; } = null!;
+        public DbSet<Session> Sessions { get; set; } = null!;
         public DbSet<Reservation> Reservations { get; set; } = null!;
         public DbSet<Gamer> Gamers { get; set; } = null!;
         public DbSet<GamerCredential> GamerCredentials { get; set; } = null!;
