@@ -166,6 +166,13 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingRulesQuery, System.Collections.Generic.List<PricingRuleResponseDto>>, Sayra.Backend.Application.Pricing.GetPricingRulesQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.ResolveRateQuery, ResolvedRateResponseDto>, Sayra.Backend.Application.Pricing.ResolveRateQueryHandler>();
 
+            // Billing Engine Services & Handlers
+            services.AddScoped<Sayra.Backend.Application.Billing.IBillingCalculator, Sayra.Backend.Application.Billing.BillingCalculator>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Billing.CalculateSessionBillingCommand, BillingResultResponseDto>, Sayra.Backend.Application.Billing.CalculateSessionBillingCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Billing.GetBillingResultQuery, BillingResultResponseDto>, Sayra.Backend.Application.Billing.GetBillingResultQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Billing.GetSessionBillingHistoryQuery, System.Collections.Generic.List<BillingResultResponseDto>>, Sayra.Backend.Application.Billing.GetSessionBillingHistoryQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Billing.GetLatestSessionBillingQuery, BillingResultResponseDto>, Sayra.Backend.Application.Billing.GetLatestSessionBillingQueryHandler>();
+
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
 

@@ -34,6 +34,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<PricingPlan> PricingPlans { get; set; } = null!;
         public DbSet<PricingRule> PricingRules { get; set; } = null!;
         public DbSet<RateSnapshot> RateSnapshots { get; set; } = null!;
+        public DbSet<BillingResult> BillingResults { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
