@@ -19,6 +19,7 @@ namespace Sayra.Backend.Api.Controllers
         private readonly ICommandHandler<CancelSessionCommand, SessionResponseDto> _cancelSessionHandler;
         private readonly ICommandHandler<TerminateSessionCommand, SessionResponseDto> _terminateSessionHandler;
         private readonly IQueryHandler<GetSessionQuery, SessionResponseDto> _getSessionHandler;
+        private readonly IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> _getTimingHandler;
         private readonly IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> _getActiveByWorkstationHandler;
         private readonly IQueryHandler<GetActiveSessionByGamerQuery, SessionResponseDto?> _getActiveByGamerHandler;
 
@@ -30,6 +31,7 @@ namespace Sayra.Backend.Api.Controllers
             ICommandHandler<CancelSessionCommand, SessionResponseDto> cancelSessionHandler,
             ICommandHandler<TerminateSessionCommand, SessionResponseDto> terminateSessionHandler,
             IQueryHandler<GetSessionQuery, SessionResponseDto> getSessionHandler,
+            IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> getTimingHandler,
             IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> getActiveByWorkstationHandler,
             IQueryHandler<GetActiveSessionByGamerQuery, SessionResponseDto?> getActiveByGamerHandler)
         {
@@ -40,6 +42,7 @@ namespace Sayra.Backend.Api.Controllers
             _cancelSessionHandler = cancelSessionHandler ?? throw new ArgumentNullException(nameof(cancelSessionHandler));
             _terminateSessionHandler = terminateSessionHandler ?? throw new ArgumentNullException(nameof(terminateSessionHandler));
             _getSessionHandler = getSessionHandler ?? throw new ArgumentNullException(nameof(getSessionHandler));
+            _getTimingHandler = getTimingHandler ?? throw new ArgumentNullException(nameof(getTimingHandler));
             _getActiveByWorkstationHandler = getActiveByWorkstationHandler ?? throw new ArgumentNullException(nameof(getActiveByWorkstationHandler));
             _getActiveByGamerHandler = getActiveByGamerHandler ?? throw new ArgumentNullException(nameof(getActiveByGamerHandler));
         }
@@ -74,6 +77,20 @@ namespace Sayra.Backend.Api.Controllers
         {
             var query = new GetSessionQuery(id);
             var result = await _getSessionHandler.HandleAsync(query, cancellationToken);
+
+            if (!result.IsSuccess)
+            {
+                return NotFound(new { code = result.ErrorCode ?? "NOT_FOUND", message = result.ErrorMessage });
+            }
+
+            return Ok(result.Value!);
+        }
+
+        [HttpGet("{id:guid}/timing")]
+        public async Task<IActionResult> GetTimingAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var query = new GetSessionTimingQuery(id);
+            var result = await _getTimingHandler.HandleAsync(query, cancellationToken);
 
             if (!result.IsSuccess)
             {

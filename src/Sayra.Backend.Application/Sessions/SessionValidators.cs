@@ -84,6 +84,50 @@ namespace Sayra.Backend.Application.Sessions
         }
     }
 
+    public class GetSessionCurrentStateQueryValidator : AbstractValidator<GetSessionCurrentStateQuery>
+    {
+        public GetSessionCurrentStateQueryValidator()
+        {
+            RuleFor(x => x.SessionId)
+                .NotEmpty()
+                .WithErrorCode("INVALID_SESSION_ID")
+                .WithMessage("SessionId must not be empty.");
+        }
+    }
+
+    public class GetSessionTimingQueryValidator : AbstractValidator<GetSessionTimingQuery>
+    {
+        public GetSessionTimingQueryValidator()
+        {
+            RuleFor(x => x.SessionId)
+                .NotEmpty()
+                .WithErrorCode("INVALID_SESSION_ID")
+                .WithMessage("SessionId must not be empty.");
+        }
+    }
+
+    public class GetSessionDurationQueryValidator : AbstractValidator<GetSessionDurationQuery>
+    {
+        public GetSessionDurationQueryValidator()
+        {
+            RuleFor(x => x.SessionId)
+                .NotEmpty()
+                .WithErrorCode("INVALID_SESSION_ID")
+                .WithMessage("SessionId must not be empty.");
+        }
+    }
+
+    public class GetSessionRemainingTimeQueryValidator : AbstractValidator<GetSessionRemainingTimeQuery>
+    {
+        public GetSessionRemainingTimeQueryValidator()
+        {
+            RuleFor(x => x.SessionId)
+                .NotEmpty()
+                .WithErrorCode("INVALID_SESSION_ID")
+                .WithMessage("SessionId must not be empty.");
+        }
+    }
+
     public class GetActiveSessionByWorkstationQueryValidator : AbstractValidator<GetActiveSessionByWorkstationQuery>
     {
         public GetActiveSessionByWorkstationQueryValidator()
