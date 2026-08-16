@@ -129,6 +129,15 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<GetGamerQuery, Gamer>, GetGamerQueryHandler>();
             services.AddScoped<IQueryHandler<GetGamerAccountQuery, GamerAccount>, GetGamerAccountQueryHandler>();
 
+            // Reservation Handlers & Validation Service
+            services.AddScoped<Sayra.Backend.Application.Reservations.IReservationValidationService, Sayra.Backend.Application.Reservations.ReservationValidationService>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Reservations.CreateReservationCommand, ReservationResponseDto>, Sayra.Backend.Application.Reservations.CreateReservationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Reservations.ConfirmReservationCommand, ReservationResponseDto>, Sayra.Backend.Application.Reservations.ConfirmReservationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Reservations.CancelReservationCommand, ReservationResponseDto>, Sayra.Backend.Application.Reservations.CancelReservationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Reservations.ActivateReservationCommand, ReservationResponseDto>, Sayra.Backend.Application.Reservations.ActivateReservationCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Reservations.GetReservationQuery, ReservationResponseDto>, Sayra.Backend.Application.Reservations.GetReservationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Reservations.ValidateReservationQuery, ReservationValidationResultDto>, Sayra.Backend.Application.Reservations.ValidateReservationQueryHandler>();
+
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
 
