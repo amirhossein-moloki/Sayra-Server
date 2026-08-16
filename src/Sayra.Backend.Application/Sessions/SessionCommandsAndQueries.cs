@@ -28,6 +28,18 @@ namespace Sayra.Backend.Application.Sessions
     public record GetSessionQuery(
         Guid SessionId) : IQuery<SessionResponseDto>;
 
+    public record GetSessionCurrentStateQuery(
+        Guid SessionId) : IQuery<SessionResponseDto>;
+
+    public record GetSessionTimingQuery(
+        Guid SessionId) : IQuery<SessionTimingResponseDto>;
+
+    public record GetSessionDurationQuery(
+        Guid SessionId) : IQuery<TimeSpan>;
+
+    public record GetSessionRemainingTimeQuery(
+        Guid SessionId) : IQuery<TimeSpan?>;
+
     public record GetActiveSessionByWorkstationQuery(
         Guid WorkstationId) : IQuery<SessionResponseDto?>;
 

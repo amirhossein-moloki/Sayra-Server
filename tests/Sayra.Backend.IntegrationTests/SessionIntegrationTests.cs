@@ -101,6 +101,69 @@ namespace Sayra.Backend.IntegrationTests
         }
 
         [Fact]
+        public async Task Session_Timing_Query_Flow()
+        {
+            var seed = await SeedHierarchyAndGamerAsync();
+
+            var startResp = await _client.PostAsJsonAsync("/api/sessions", new StartSessionRequestDto
+            {
+                GamerId = seed.GamerId,
+                WorkstationId = seed.WorkstationId
+            });
+            Assert.Equal(HttpStatusCode.Created, startResp.StatusCode);
+            var session = await startResp.Content.ReadFromJsonAsync<SessionResponseDto>();
+            Assert.NotNull(session);
+
+            // Fetch timing
+            var timingResp = await _client.GetAsync($"/api/sessions/{session.SessionId}/timing");
+            Assert.Equal(HttpStatusCode.OK, timingResp.StatusCode);
+
+            var timing = await timingResp.Content.ReadFromJsonAsync<SessionTimingResponseDto>();
+            Assert.NotNull(timing);
+            Assert.Equal(session.SessionId, timing.SessionId);
+            Assert.True(timing.ConsumedDuration >= TimeSpan.Zero);
+            Assert.Equal(TimeSpan.Zero, timing.PausedDuration);
+        }
+
+        [Fact]
+        public async Task Session_Duplicate_Pause_And_Resume_Idempotency_Flow()
+        {
+            var seed = await SeedHierarchyAndGamerAsync();
+
+            var startResp = await _client.PostAsJsonAsync("/api/sessions", new StartSessionRequestDto
+            {
+                GamerId = seed.GamerId,
+                WorkstationId = seed.WorkstationId
+            });
+            Assert.Equal(HttpStatusCode.Created, startResp.StatusCode);
+            var session = await startResp.Content.ReadFromJsonAsync<SessionResponseDto>();
+            Assert.NotNull(session);
+
+            // Pause first time
+            var pause1 = await _client.PostAsJsonAsync($"/api/sessions/{session.SessionId}/pause", new { });
+            Assert.Equal(HttpStatusCode.OK, pause1.StatusCode);
+
+            // Pause second time (idempotent duplicate pause)
+            var pause2 = await _client.PostAsJsonAsync($"/api/sessions/{session.SessionId}/pause", new { });
+            Assert.Equal(HttpStatusCode.OK, pause2.StatusCode);
+
+            // Resume first time
+            var resume1 = await _client.PostAsJsonAsync($"/api/sessions/{session.SessionId}/resume", new { });
+            Assert.Equal(HttpStatusCode.OK, resume1.StatusCode);
+
+            // Resume second time (idempotent duplicate resume)
+            var resume2 = await _client.PostAsJsonAsync($"/api/sessions/{session.SessionId}/resume", new { });
+            Assert.Equal(HttpStatusCode.OK, resume2.StatusCode);
+
+            // Verify timing query returns valid active consumed duration
+            var timingResp = await _client.GetAsync($"/api/sessions/{session.SessionId}/timing");
+            Assert.Equal(HttpStatusCode.OK, timingResp.StatusCode);
+            var timing = await timingResp.Content.ReadFromJsonAsync<SessionTimingResponseDto>();
+            Assert.NotNull(timing);
+            Assert.True(timing.ConsumedDuration >= TimeSpan.Zero);
+        }
+
+        [Fact]
         public async Task Double_Start_Session_On_Workstation_Should_Return_Conflict()
         {
             var seed = await SeedHierarchyAndGamerAsync();
@@ -171,6 +234,14 @@ namespace Sayra.Backend.IntegrationTests
             var sessionDto = await startResp.Content.ReadFromJsonAsync<SessionResponseDto>();
             Assert.NotNull(sessionDto);
             Assert.Equal(resDto.ReservationId, sessionDto.ReservationId);
+
+            // Verify timing query returns allocated remaining duration from reservation
+            var timingResp = await _client.GetAsync($"/api/sessions/{sessionDto.SessionId}/timing");
+            Assert.Equal(HttpStatusCode.OK, timingResp.StatusCode);
+            var timing = await timingResp.Content.ReadFromJsonAsync<SessionTimingResponseDto>();
+            Assert.NotNull(timing);
+            Assert.NotNull(timing.RemainingDuration);
+            Assert.NotNull(timing.ExpirationTimeUtc);
 
             // 3. Verify Reservation status is now ACTIVE
             var getResResponse = await _client.GetAsync($"/api/reservations/{resDto.ReservationId}");

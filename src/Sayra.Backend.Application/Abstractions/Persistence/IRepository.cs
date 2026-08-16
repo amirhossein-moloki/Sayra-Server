@@ -11,6 +11,7 @@ namespace Sayra.Backend.Application.Abstractions.Persistence
     {
         Task<T?> GetByIdAsync(Guid id, bool track = true, CancellationToken cancellationToken = default);
         Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, bool track = true, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<T>> FindAsync(Expression<Func<T, bool>> predicate, bool track = true, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<T>> GetAllAsync(bool track = true, CancellationToken cancellationToken = default);
         Task AddAsync(T entity, CancellationToken cancellationToken = default);
         void Update(T entity);

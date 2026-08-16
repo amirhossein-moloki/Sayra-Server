@@ -45,6 +45,18 @@ namespace Sayra.Backend.Infrastructure.Persistence
             }
         }
 
+        public virtual async Task<IReadOnlyList<T>> FindAsync(Expression<Func<T, bool>> predicate, bool track = true, CancellationToken cancellationToken = default)
+        {
+            if (track)
+            {
+                return await _dbSet.Where(predicate).ToListAsync(cancellationToken);
+            }
+            else
+            {
+                return await _dbSet.AsNoTracking().Where(predicate).ToListAsync(cancellationToken);
+            }
+        }
+
         public virtual async Task<IReadOnlyList<T>> GetAllAsync(bool track = true, CancellationToken cancellationToken = default)
         {
             if (track)

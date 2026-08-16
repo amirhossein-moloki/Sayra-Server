@@ -16,6 +16,7 @@ namespace Sayra.Backend.Application.Sessions
     public class StartSessionCommandHandler : ICommandHandler<StartSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<Workstation> _workstationRepository;
         private readonly IRepository<Reservation> _reservationRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
@@ -24,6 +25,7 @@ namespace Sayra.Backend.Application.Sessions
 
         public StartSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<Workstation> workstationRepository,
             IRepository<Reservation> reservationRepository,
             IRepository<AuditEvent> auditEventRepository,
@@ -31,6 +33,7 @@ namespace Sayra.Backend.Application.Sessions
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
@@ -77,6 +80,8 @@ namespace Sayra.Backend.Application.Sessions
                     }
                 }
 
+                var serverNow = DateTime.UtcNow;
+
                 var session = new Session
                 {
                     OrganizationId = workstation.OrganizationEntityId.Value,
@@ -84,7 +89,7 @@ namespace Sayra.Backend.Application.Sessions
                     WorkstationId = command.WorkstationId,
                     GamerId = command.GamerId,
                     ReservationId = command.ReservationId,
-                    StartedAt = DateTime.UtcNow,
+                    StartedAt = serverNow,
                     Status = "IDLE"
                 };
 
@@ -94,12 +99,23 @@ namespace Sayra.Backend.Application.Sessions
 
                 await _sessionRepository.AddAsync(session, cancellationToken);
 
+                var initialSegment = new SessionSegment
+                {
+                    SessionId = session.Id,
+                    Type = "ACTIVE",
+                    StartedAtUtc = serverNow,
+                    EndedAtUtc = null,
+                    CreatedAt = serverNow
+                };
+                initialSegment.NormalizeAndValidate();
+                await _segmentRepository.AddAsync(initialSegment, cancellationToken);
+
                 var createdEvent = new AuditEvent
                 {
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionCreated),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionCreated(
                         session.Id,
                         session.GamerId,
@@ -109,7 +125,7 @@ namespace Sayra.Backend.Application.Sessions
                         session.ReservationId,
                         session.Status,
                         session.StartedAt,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(createdEvent, cancellationToken);
@@ -119,14 +135,14 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionStarted),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionStarted(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.SiteId,
                         session.Status,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(startedEvent, cancellationToken);
@@ -168,15 +184,18 @@ namespace Sayra.Backend.Application.Sessions
     public class PauseSessionCommandHandler : ICommandHandler<PauseSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public PauseSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
@@ -199,6 +218,35 @@ namespace Sayra.Backend.Application.Sessions
                     return Result<SessionResponseDto>.Failure("NOT_FOUND", $"Session with ID '{command.SessionId}' not found.");
                 }
 
+                if (session.Status == "PAUSED")
+                {
+                    return Result<SessionResponseDto>.Success(MapToDto(session));
+                }
+
+                var serverNow = DateTime.UtcNow;
+
+                var openSegment = await _segmentRepository.FirstOrDefaultAsync(
+                    s => s.SessionId == session.Id && s.EndedAtUtc == null,
+                    track: true,
+                    cancellationToken);
+
+                if (openSegment != null)
+                {
+                    openSegment.EndedAtUtc = serverNow;
+                    _segmentRepository.Update(openSegment);
+                }
+
+                var pausedSegment = new SessionSegment
+                {
+                    SessionId = session.Id,
+                    Type = "PAUSED",
+                    StartedAtUtc = serverNow,
+                    EndedAtUtc = null,
+                    CreatedAt = serverNow
+                };
+                pausedSegment.NormalizeAndValidate();
+                await _segmentRepository.AddAsync(pausedSegment, cancellationToken);
+
                 session.TransitionTo("PAUSED");
                 _sessionRepository.Update(session);
 
@@ -207,13 +255,13 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionPaused),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionPaused(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.Status,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
@@ -255,15 +303,18 @@ namespace Sayra.Backend.Application.Sessions
     public class ResumeSessionCommandHandler : ICommandHandler<ResumeSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public ResumeSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
@@ -286,6 +337,35 @@ namespace Sayra.Backend.Application.Sessions
                     return Result<SessionResponseDto>.Failure("NOT_FOUND", $"Session with ID '{command.SessionId}' not found.");
                 }
 
+                if (session.Status == "ACTIVE")
+                {
+                    return Result<SessionResponseDto>.Success(MapToDto(session));
+                }
+
+                var serverNow = DateTime.UtcNow;
+
+                var openSegment = await _segmentRepository.FirstOrDefaultAsync(
+                    s => s.SessionId == session.Id && s.EndedAtUtc == null,
+                    track: true,
+                    cancellationToken);
+
+                if (openSegment != null)
+                {
+                    openSegment.EndedAtUtc = serverNow;
+                    _segmentRepository.Update(openSegment);
+                }
+
+                var activeSegment = new SessionSegment
+                {
+                    SessionId = session.Id,
+                    Type = "ACTIVE",
+                    StartedAtUtc = serverNow,
+                    EndedAtUtc = null,
+                    CreatedAt = serverNow
+                };
+                activeSegment.NormalizeAndValidate();
+                await _segmentRepository.AddAsync(activeSegment, cancellationToken);
+
                 session.TransitionTo("ACTIVE");
                 _sessionRepository.Update(session);
 
@@ -294,13 +374,13 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionResumed),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionResumed(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.Status,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
@@ -342,17 +422,20 @@ namespace Sayra.Backend.Application.Sessions
     public class StopSessionCommandHandler : ICommandHandler<StopSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<Reservation> _reservationRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public StopSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<Reservation> reservationRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -381,6 +464,19 @@ namespace Sayra.Backend.Application.Sessions
                     return Result<SessionResponseDto>.Success(MapToDto(session));
                 }
 
+                var serverNow = DateTime.UtcNow;
+
+                var openSegment = await _segmentRepository.FirstOrDefaultAsync(
+                    s => s.SessionId == session.Id && s.EndedAtUtc == null,
+                    track: true,
+                    cancellationToken);
+
+                if (openSegment != null)
+                {
+                    openSegment.EndedAtUtc = serverNow;
+                    _segmentRepository.Update(openSegment);
+                }
+
                 session.TransitionTo("ENDING");
                 session.TransitionTo("ENDED");
                 _sessionRepository.Update(session);
@@ -400,13 +496,13 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionStopped),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionStopped(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.Status,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
@@ -448,17 +544,20 @@ namespace Sayra.Backend.Application.Sessions
     public class CancelSessionCommandHandler : ICommandHandler<CancelSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<Reservation> _reservationRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public CancelSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<Reservation> reservationRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -487,6 +586,19 @@ namespace Sayra.Backend.Application.Sessions
                     return Result<SessionResponseDto>.Success(MapToDto(session));
                 }
 
+                var serverNow = DateTime.UtcNow;
+
+                var openSegment = await _segmentRepository.FirstOrDefaultAsync(
+                    s => s.SessionId == session.Id && s.EndedAtUtc == null,
+                    track: true,
+                    cancellationToken);
+
+                if (openSegment != null)
+                {
+                    openSegment.EndedAtUtc = serverNow;
+                    _segmentRepository.Update(openSegment);
+                }
+
                 session.TransitionTo("CANCELLED");
                 _sessionRepository.Update(session);
 
@@ -505,13 +617,13 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionCancelled),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionCancelled(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.Status,
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
@@ -553,15 +665,18 @@ namespace Sayra.Backend.Application.Sessions
     public class TerminateSessionCommandHandler : ICommandHandler<TerminateSessionCommand, SessionResponseDto>
     {
         private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public TerminateSessionCommandHandler(
             IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
@@ -589,6 +704,19 @@ namespace Sayra.Backend.Application.Sessions
                     return Result<SessionResponseDto>.Success(MapToDto(session));
                 }
 
+                var serverNow = DateTime.UtcNow;
+
+                var openSegment = await _segmentRepository.FirstOrDefaultAsync(
+                    s => s.SessionId == session.Id && s.EndedAtUtc == null,
+                    track: true,
+                    cancellationToken);
+
+                if (openSegment != null)
+                {
+                    openSegment.EndedAtUtc = serverNow;
+                    _segmentRepository.Update(openSegment);
+                }
+
                 session.TransitionTo("TERMINATED");
                 _sessionRepository.Update(session);
 
@@ -597,14 +725,14 @@ namespace Sayra.Backend.Application.Sessions
                     EventId = Guid.NewGuid(),
                     EventType = nameof(SessionTerminated),
                     EventVersion = 1,
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = serverNow,
                     Payload = JsonSerializer.Serialize(new SessionTerminated(
                         session.Id,
                         session.GamerId,
                         session.WorkstationId,
                         session.Status,
                         command.Reason ?? "Terminated by administrator",
-                        DateTime.UtcNow
+                        serverNow
                     ))
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
@@ -688,6 +816,210 @@ namespace Sayra.Backend.Application.Sessions
                 CreatedAt = s.CreatedAt,
                 UpdatedAt = s.UpdatedAt
             };
+        }
+    }
+
+    public class GetSessionCurrentStateQueryHandler : IQueryHandler<GetSessionCurrentStateQuery, SessionResponseDto>
+    {
+        private readonly IRepository<Session> _sessionRepository;
+
+        public GetSessionCurrentStateQueryHandler(IRepository<Session> sessionRepository)
+        {
+            _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        }
+
+        public async Task<Result<SessionResponseDto>> HandleAsync(GetSessionCurrentStateQuery query, CancellationToken cancellationToken = default)
+        {
+            var validator = new GetSessionCurrentStateQueryValidator();
+            var validationResult = await validator.ValidateAsync(query, cancellationToken);
+            if (!validationResult.IsValid)
+            {
+                var firstError = validationResult.Errors.First();
+                return Result<SessionResponseDto>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
+            }
+
+            var session = await _sessionRepository.GetByIdAsync(query.SessionId, track: false, cancellationToken);
+            if (session == null)
+            {
+                return Result<SessionResponseDto>.Failure("NOT_FOUND", $"Session with ID '{query.SessionId}' not found.");
+            }
+
+            return Result<SessionResponseDto>.Success(MapToDto(session));
+        }
+
+        private static SessionResponseDto MapToDto(Session s)
+        {
+            return new SessionResponseDto
+            {
+                SessionId = s.Id,
+                OrganizationId = s.OrganizationId,
+                SiteId = s.SiteId,
+                WorkstationId = s.WorkstationId,
+                GamerId = s.GamerId,
+                ReservationId = s.ReservationId,
+                Status = s.Status,
+                StartedAt = s.StartedAt,
+                PausedAt = s.PausedAt,
+                EndedAt = s.EndedAt,
+                CreatedAt = s.CreatedAt,
+                UpdatedAt = s.UpdatedAt
+            };
+        }
+    }
+
+    public class GetSessionTimingQueryHandler : IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto>
+    {
+        private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
+        private readonly IRepository<Reservation> _reservationRepository;
+        private readonly ISessionTimeCalculator _timeCalculator;
+
+        public GetSessionTimingQueryHandler(
+            IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
+            IRepository<Reservation> reservationRepository,
+            ISessionTimeCalculator timeCalculator)
+        {
+            _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
+            _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
+            _timeCalculator = timeCalculator ?? throw new ArgumentNullException(nameof(timeCalculator));
+        }
+
+        public async Task<Result<SessionTimingResponseDto>> HandleAsync(GetSessionTimingQuery query, CancellationToken cancellationToken = default)
+        {
+            var validator = new GetSessionTimingQueryValidator();
+            var validationResult = await validator.ValidateAsync(query, cancellationToken);
+            if (!validationResult.IsValid)
+            {
+                var firstError = validationResult.Errors.First();
+                return Result<SessionTimingResponseDto>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
+            }
+
+            var session = await _sessionRepository.GetByIdAsync(query.SessionId, track: false, cancellationToken);
+            if (session == null)
+            {
+                return Result<SessionTimingResponseDto>.Failure("NOT_FOUND", $"Session with ID '{query.SessionId}' not found.");
+            }
+
+            var sessionSegments = await _segmentRepository.FindAsync(s => s.SessionId == query.SessionId, track: false, cancellationToken);
+
+            TimeSpan? allocatedDuration = null;
+            if (session.ReservationId.HasValue && session.ReservationId.Value != Guid.Empty)
+            {
+                var reservation = await _reservationRepository.GetByIdAsync(session.ReservationId.Value, track: false, cancellationToken);
+                if (reservation != null && reservation.EndTimeUtc > reservation.StartTimeUtc)
+                {
+                    allocatedDuration = reservation.EndTimeUtc - reservation.StartTimeUtc;
+                }
+            }
+
+            var serverNow = DateTime.UtcNow;
+            var snapshot = _timeCalculator.CalculateTiming(session, sessionSegments, serverNow, allocatedDuration);
+
+            var dto = new SessionTimingResponseDto
+            {
+                SessionId = snapshot.SessionId,
+                CurrentServerTimeUtc = snapshot.CurrentServerTimeUtc,
+                StartedAtUtc = snapshot.StartedAtUtc,
+                ConsumedDuration = snapshot.ConsumedDuration,
+                PausedDuration = snapshot.PausedDuration,
+                RemainingDuration = snapshot.RemainingDuration,
+                ExpirationTimeUtc = snapshot.ExpirationTimeUtc
+            };
+
+            return Result<SessionTimingResponseDto>.Success(dto);
+        }
+    }
+
+    public class GetSessionDurationQueryHandler : IQueryHandler<GetSessionDurationQuery, TimeSpan>
+    {
+        private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
+        private readonly ISessionTimeCalculator _timeCalculator;
+
+        public GetSessionDurationQueryHandler(
+            IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
+            ISessionTimeCalculator timeCalculator)
+        {
+            _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
+            _timeCalculator = timeCalculator ?? throw new ArgumentNullException(nameof(timeCalculator));
+        }
+
+        public async Task<Result<TimeSpan>> HandleAsync(GetSessionDurationQuery query, CancellationToken cancellationToken = default)
+        {
+            var validator = new GetSessionDurationQueryValidator();
+            var validationResult = await validator.ValidateAsync(query, cancellationToken);
+            if (!validationResult.IsValid)
+            {
+                var firstError = validationResult.Errors.First();
+                return Result<TimeSpan>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
+            }
+
+            var session = await _sessionRepository.GetByIdAsync(query.SessionId, track: false, cancellationToken);
+            if (session == null)
+            {
+                return Result<TimeSpan>.Failure("NOT_FOUND", $"Session with ID '{query.SessionId}' not found.");
+            }
+
+            var sessionSegments = await _segmentRepository.FindAsync(s => s.SessionId == query.SessionId, track: false, cancellationToken);
+
+            var snapshot = _timeCalculator.CalculateTiming(session, sessionSegments, DateTime.UtcNow, null);
+            return Result<TimeSpan>.Success(snapshot.ConsumedDuration);
+        }
+    }
+
+    public class GetSessionRemainingTimeQueryHandler : IQueryHandler<GetSessionRemainingTimeQuery, TimeSpan?>
+    {
+        private readonly IRepository<Session> _sessionRepository;
+        private readonly IRepository<SessionSegment> _segmentRepository;
+        private readonly IRepository<Reservation> _reservationRepository;
+        private readonly ISessionTimeCalculator _timeCalculator;
+
+        public GetSessionRemainingTimeQueryHandler(
+            IRepository<Session> sessionRepository,
+            IRepository<SessionSegment> segmentRepository,
+            IRepository<Reservation> reservationRepository,
+            ISessionTimeCalculator timeCalculator)
+        {
+            _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+            _segmentRepository = segmentRepository ?? throw new ArgumentNullException(nameof(segmentRepository));
+            _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
+            _timeCalculator = timeCalculator ?? throw new ArgumentNullException(nameof(timeCalculator));
+        }
+
+        public async Task<Result<TimeSpan?>> HandleAsync(GetSessionRemainingTimeQuery query, CancellationToken cancellationToken = default)
+        {
+            var validator = new GetSessionRemainingTimeQueryValidator();
+            var validationResult = await validator.ValidateAsync(query, cancellationToken);
+            if (!validationResult.IsValid)
+            {
+                var firstError = validationResult.Errors.First();
+                return Result<TimeSpan?>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
+            }
+
+            var session = await _sessionRepository.GetByIdAsync(query.SessionId, track: false, cancellationToken);
+            if (session == null)
+            {
+                return Result<TimeSpan?>.Failure("NOT_FOUND", $"Session with ID '{query.SessionId}' not found.");
+            }
+
+            var sessionSegments = await _segmentRepository.FindAsync(s => s.SessionId == query.SessionId, track: false, cancellationToken);
+
+            TimeSpan? allocatedDuration = null;
+            if (session.ReservationId.HasValue && session.ReservationId.Value != Guid.Empty)
+            {
+                var reservation = await _reservationRepository.GetByIdAsync(session.ReservationId.Value, track: false, cancellationToken);
+                if (reservation != null && reservation.EndTimeUtc > reservation.StartTimeUtc)
+                {
+                    allocatedDuration = reservation.EndTimeUtc - reservation.StartTimeUtc;
+                }
+            }
+
+            var snapshot = _timeCalculator.CalculateTiming(session, sessionSegments, DateTime.UtcNow, allocatedDuration);
+            return Result<TimeSpan?>.Success(snapshot.RemainingDuration);
         }
     }
 

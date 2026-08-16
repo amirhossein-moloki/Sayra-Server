@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Moq;
@@ -161,6 +162,150 @@ namespace Sayra.Backend.UnitTests
 
             Assert.False(result.IsSuccess);
             Assert.Equal("GAMER_DISABLED", result.ErrorCode);
+        }
+
+        [Fact]
+        public void SessionSegment_NormalizeAndValidate_Empty_SessionId_Should_Throw()
+        {
+            var segment = new SessionSegment
+            {
+                SessionId = Guid.Empty,
+                Type = "ACTIVE",
+                StartedAtUtc = DateTime.UtcNow
+            };
+
+            var ex = Assert.Throws<InvalidDomainException>(() => segment.NormalizeAndValidate());
+            Assert.Equal("INVALID_SESSION_ID", ex.ErrorCode);
+        }
+
+        [Fact]
+        public void SessionSegment_NormalizeAndValidate_Invalid_Type_Should_Throw()
+        {
+            var segment = new SessionSegment
+            {
+                SessionId = Guid.NewGuid(),
+                Type = "UNKNOWN_TYPE",
+                StartedAtUtc = DateTime.UtcNow
+            };
+
+            var ex = Assert.Throws<InvalidDomainException>(() => segment.NormalizeAndValidate());
+            Assert.Equal("INVALID_SEGMENT_TYPE", ex.ErrorCode);
+        }
+
+        [Fact]
+        public void SessionSegment_NormalizeAndValidate_EndedAt_Before_StartedAt_Should_Throw()
+        {
+            var now = DateTime.UtcNow;
+            var segment = new SessionSegment
+            {
+                SessionId = Guid.NewGuid(),
+                Type = "ACTIVE",
+                StartedAtUtc = now,
+                EndedAtUtc = now.AddMinutes(-5)
+            };
+
+            var ex = Assert.Throws<InvalidDomainException>(() => segment.NormalizeAndValidate());
+            Assert.Equal("INVALID_TIME_RANGE", ex.ErrorCode);
+        }
+
+        [Fact]
+        public void SessionTimeCalculator_CalculateTiming_Only_Active_Segments_Should_Sum_Correctly()
+        {
+            var session = CreateValidSession();
+            session.Status = "ACTIVE";
+            var baseTime = new DateTime(2026, 8, 16, 10, 0, 0, DateTimeKind.Utc);
+            session.StartedAt = baseTime;
+
+            var segments = new List<SessionSegment>
+            {
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime, EndedAtUtc = baseTime.AddMinutes(30) },
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime.AddMinutes(30), EndedAtUtc = null }
+            };
+
+            var calculator = new SessionTimeCalculator();
+            var serverNow = baseTime.AddHours(1); // 11:00 (30m first + 30m open) = 60m total active
+
+            var snapshot = calculator.CalculateTiming(session, segments, serverNow);
+
+            Assert.Equal(TimeSpan.FromMinutes(60), snapshot.ConsumedDuration);
+            Assert.Equal(TimeSpan.Zero, snapshot.PausedDuration);
+            Assert.Null(snapshot.RemainingDuration);
+        }
+
+        [Fact]
+        public void SessionTimeCalculator_CalculateTiming_Active_And_Paused_Segments_Should_Exclude_Paused_From_ConsumedDuration()
+        {
+            var session = CreateValidSession();
+            session.Status = "ACTIVE";
+            var baseTime = new DateTime(2026, 8, 16, 10, 0, 0, DateTimeKind.Utc);
+            session.StartedAt = baseTime;
+
+            // ACTIVE: 10:00-10:30 (30m)
+            // PAUSED: 10:30-11:00 (30m)
+            // ACTIVE: 11:00-12:00 (60m)
+            var segments = new List<SessionSegment>
+            {
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime, EndedAtUtc = baseTime.AddMinutes(30) },
+                new SessionSegment { SessionId = session.Id, Type = "PAUSED", StartedAtUtc = baseTime.AddMinutes(30), EndedAtUtc = baseTime.AddMinutes(60) },
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime.AddMinutes(60), EndedAtUtc = baseTime.AddMinutes(120) }
+            };
+
+            var calculator = new SessionTimeCalculator();
+            var serverNow = baseTime.AddMinutes(120);
+
+            var snapshot = calculator.CalculateTiming(session, segments, serverNow);
+
+            Assert.Equal(TimeSpan.FromMinutes(90), snapshot.ConsumedDuration); // 1h 30m
+            Assert.Equal(TimeSpan.FromMinutes(30), snapshot.PausedDuration);   // 30m
+        }
+
+        [Fact]
+        public void SessionTimeCalculator_CalculateTiming_With_AllocatedDuration_Should_Compute_RemainingDuration_And_Expiration()
+        {
+            var session = CreateValidSession();
+            session.Status = "ACTIVE";
+            var baseTime = new DateTime(2026, 8, 16, 10, 0, 0, DateTimeKind.Utc);
+            session.StartedAt = baseTime;
+
+            // ACTIVE: 10:00-10:30 (30m consumed)
+            var segments = new List<SessionSegment>
+            {
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime, EndedAtUtc = baseTime.AddMinutes(30) }
+            };
+
+            var calculator = new SessionTimeCalculator();
+            var serverNow = baseTime.AddMinutes(30);
+            var allocated = TimeSpan.FromHours(2); // 2 hours allocated
+
+            var snapshot = calculator.CalculateTiming(session, segments, serverNow, allocated);
+
+            Assert.Equal(TimeSpan.FromMinutes(30), snapshot.ConsumedDuration);
+            Assert.Equal(TimeSpan.FromMinutes(90), snapshot.RemainingDuration); // 2h - 30m = 90m
+            Assert.Equal(serverNow.AddMinutes(90), snapshot.ExpirationTimeUtc);
+        }
+
+        [Fact]
+        public void SessionTimeCalculator_CalculateTiming_RemainingDuration_Should_Not_Be_Negative()
+        {
+            var session = CreateValidSession();
+            session.Status = "ACTIVE";
+            var baseTime = new DateTime(2026, 8, 16, 10, 0, 0, DateTimeKind.Utc);
+            session.StartedAt = baseTime;
+
+            // ACTIVE: 10:00-12:00 (120m consumed)
+            var segments = new List<SessionSegment>
+            {
+                new SessionSegment { SessionId = session.Id, Type = "ACTIVE", StartedAtUtc = baseTime, EndedAtUtc = baseTime.AddMinutes(120) }
+            };
+
+            var calculator = new SessionTimeCalculator();
+            var serverNow = baseTime.AddMinutes(120);
+            var allocated = TimeSpan.FromHours(1); // 1 hour allocated, but consumed 2 hours
+
+            var snapshot = calculator.CalculateTiming(session, segments, serverNow, allocated);
+
+            Assert.Equal(TimeSpan.FromHours(2), snapshot.ConsumedDuration);
+            Assert.Equal(TimeSpan.Zero, snapshot.RemainingDuration);
         }
 
         private static Session CreateValidSession()

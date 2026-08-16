@@ -29,4 +29,15 @@ namespace Sayra.Backend.Contracts
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }
+
+    public class SessionTimingResponseDto
+    {
+        public Guid SessionId { get; set; }
+        public DateTime CurrentServerTimeUtc { get; set; }
+        public DateTime StartedAtUtc { get; set; }
+        public TimeSpan ConsumedDuration { get; set; }
+        public TimeSpan PausedDuration { get; set; }
+        public TimeSpan? RemainingDuration { get; set; }
+        public DateTime? ExpirationTimeUtc { get; set; }
+    }
 }

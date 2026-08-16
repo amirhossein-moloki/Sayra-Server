@@ -140,6 +140,7 @@ namespace Sayra.Backend.Infrastructure
 
             // Session Handlers & Domain Service
             services.AddScoped<Sayra.Backend.Application.Sessions.ISessionStateTransitionService, Sayra.Backend.Application.Sessions.SessionStateTransitionService>();
+            services.AddSingleton<Sayra.Backend.Application.Sessions.ISessionTimeCalculator, Sayra.Backend.Application.Sessions.SessionTimeCalculator>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.StartSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.StartSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.PauseSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.PauseSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.ResumeSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.ResumeSessionCommandHandler>();
@@ -147,6 +148,10 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.CancelSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.CancelSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.TerminateSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.TerminateSessionCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionQuery, SessionResponseDto>, Sayra.Backend.Application.Sessions.GetSessionQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionCurrentStateQuery, SessionResponseDto>, Sayra.Backend.Application.Sessions.GetSessionCurrentStateQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionTimingQuery, SessionTimingResponseDto>, Sayra.Backend.Application.Sessions.GetSessionTimingQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionDurationQuery, System.TimeSpan>, Sayra.Backend.Application.Sessions.GetSessionDurationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionRemainingTimeQuery, System.TimeSpan?>, Sayra.Backend.Application.Sessions.GetSessionRemainingTimeQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByWorkstationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQuery, SessionResponseDto?>, Sayra.Backend.Application.Sessions.GetActiveSessionByGamerQueryHandler>();
 
