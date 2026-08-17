@@ -21,8 +21,11 @@ namespace Sayra.Backend.Application.Workstations
         public async Task<Result<Workstation?>> HandleAsync(GetWorkstationByPcIdQuery query, CancellationToken cancellationToken = default)
         {
             var pcIdUpper = (query.PcId ?? string.Empty).Trim().ToUpperInvariant();
-            var workstations = await _workstationRepository.GetAllAsync(track: false, cancellationToken);
-            var workstation = workstations.FirstOrDefault(w => w.PcId.Equals(pcIdUpper, StringComparison.OrdinalIgnoreCase));
+            // Performance Optimization: Use database-level indexed query instead of fetching the entire table into memory
+            var workstation = await _workstationRepository.FirstOrDefaultAsync(
+                w => w.PcId == pcIdUpper,
+                track: false,
+                cancellationToken);
             return Result<Workstation?>.Success(workstation);
         }
     }

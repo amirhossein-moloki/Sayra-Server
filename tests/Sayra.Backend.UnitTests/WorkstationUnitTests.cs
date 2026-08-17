@@ -181,10 +181,19 @@ namespace Sayra.Backend.UnitTests
             var mockAudit = new Mock<IRepository<AuditEvent>>();
             var mockUow = new Mock<IUnitOfWork>();
 
+            var sites = new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } };
+            var workstations = new List<Workstation>();
+
+            mockSiteRepo.Setup(s => s.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Site, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Site, bool>> predicate, bool track, CancellationToken ct) => sites.FirstOrDefault(predicate.Compile()));
+
+            mockRepo.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Workstation, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Workstation, bool>> predicate, bool track, CancellationToken ct) => workstations.FirstOrDefault(predicate.Compile()));
+
             mockRepo.Setup(r => r.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Workstation>());
+                .ReturnsAsync(workstations);
             mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } });
+                .ReturnsAsync(sites);
 
             var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
@@ -230,10 +239,19 @@ namespace Sayra.Backend.UnitTests
                 IpAddress = "10.0.0.5"
             };
 
+            var sites = new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } };
+            var workstations = new List<Workstation> { existing };
+
+            mockSiteRepo.Setup(s => s.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Site, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Site, bool>> predicate, bool track, CancellationToken ct) => sites.FirstOrDefault(predicate.Compile()));
+
+            mockRepo.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Workstation, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Workstation, bool>> predicate, bool track, CancellationToken ct) => workstations.FirstOrDefault(predicate.Compile()));
+
             mockRepo.Setup(r => r.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Workstation> { existing });
+                .ReturnsAsync(workstations);
             mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-ALPHA", Code = "SITE-ALPHA", Name = "Site Alpha" } });
+                .ReturnsAsync(sites);
 
             var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
@@ -277,12 +295,21 @@ namespace Sayra.Backend.UnitTests
             };
             typeof(BaseEntity).GetProperty("Id")?.SetValue(existing, existingId);
 
+            var sites = new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-NEW", Code = "SITE-NEW", Name = "Site New" } };
+            var workstations = new List<Workstation> { existing };
+
+            mockSiteRepo.Setup(s => s.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Site, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Site, bool>> predicate, bool track, CancellationToken ct) => sites.FirstOrDefault(predicate.Compile()));
+
+            mockRepo.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Workstation, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((System.Linq.Expressions.Expression<Func<Workstation, bool>> predicate, bool track, CancellationToken ct) => workstations.FirstOrDefault(predicate.Compile()));
+
             mockRepo.Setup(r => r.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Workstation> { existing });
+                .ReturnsAsync(workstations);
             mockRepo.Setup(r => r.GetByIdAsync(existingId, true, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
             mockSiteRepo.Setup(s => s.GetAllAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<Site> { new Site { OrganizationId = Guid.NewGuid(), SiteId = "SITE-NEW", Code = "SITE-NEW", Name = "Site New" } });
+                .ReturnsAsync(sites);
 
             var handler = new RegisterWorkstationCommandHandler(mockRepo.Object, mockSiteRepo.Object, mockAudit.Object, mockUow.Object);
             var command = new RegisterWorkstationCommand
