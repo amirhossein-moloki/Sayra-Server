@@ -178,7 +178,9 @@ namespace Sayra.Backend.IntegrationTests
             var gamer = new Gamer { GamerId = $"GMR-{Guid.NewGuid():N}"[..8], Username = $"usr_{Guid.NewGuid():N}"[..8], Email = $"usr_{Guid.NewGuid():N}@test.com" };
             db.Gamers.Add(gamer);
 
-            var ws = new Workstation { PcId = $"PC-{Guid.NewGuid():N}"[..8], SiteId = site.Code, Hostname = "H1", MacAddress = $"BB:11:22:33:44:{Random.Shared.Next(10, 99)}", IpAddress = "127.0.0.1" };
+            string macSuffix = Guid.NewGuid().ToString("N")[..8];
+            string macAddress = $"BB:{macSuffix[..2]}:{macSuffix[2..4]}:{macSuffix[4..6]}:{macSuffix[6..8]}".ToUpperInvariant();
+            var ws = new Workstation { PcId = $"PC-{Guid.NewGuid():N}"[..8], SiteId = site.Code, Hostname = "H1", MacAddress = macAddress, IpAddress = "127.0.0.1" };
             db.Workstations.Add(ws);
 
             var session = new Session
