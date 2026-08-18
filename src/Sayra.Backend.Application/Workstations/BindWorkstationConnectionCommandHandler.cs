@@ -49,8 +49,11 @@ namespace Sayra.Backend.Application.Workstations
             }
 
             // 2. Look up the workstation in DB
-            var workstations = await _workstationRepository.GetAllAsync(track: true, cancellationToken);
-            var workstation = workstations.FirstOrDefault(w => w.PcId.Equals(pcIdUpper, StringComparison.OrdinalIgnoreCase));
+            // Performance Optimization: Use database-level indexed query instead of fetching the entire table into memory
+            var workstation = await _workstationRepository.FirstOrDefaultAsync(
+                w => w.PcId == pcIdUpper,
+                track: true,
+                cancellationToken);
 
             if (workstation == null)
             {

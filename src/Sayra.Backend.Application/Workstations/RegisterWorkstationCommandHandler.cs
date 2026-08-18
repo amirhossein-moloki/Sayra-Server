@@ -47,22 +47,28 @@ namespace Sayra.Backend.Application.Workstations
                 var siteIdNormalized = command.SiteId.Trim().ToUpperInvariant();
 
                 // 2. Validate Site existence
-                var allSites = await _siteRepository.GetAllAsync(track: false, cancellationToken);
-                var siteExists = allSites.Any(s => s.SiteId.Equals(siteIdNormalized, StringComparison.OrdinalIgnoreCase));
-                if (!siteExists)
+                // Performance Optimization: Use database-level indexed query instead of fetching all sites into memory
+                var site = await _siteRepository.FirstOrDefaultAsync(s => s.SiteId == siteIdNormalized, track: false, cancellationToken);
+                if (site == null)
                 {
                     return Result<Workstation>.Failure("INVALID_SITE_ID", $"Site with ID '{command.SiteId}' does not exist.");
                 }
 
                 // 3. MAC Address Uniqueness Check
-                var allWorkstations = await _workstationRepository.GetAllAsync(track: false, cancellationToken);
-                var duplicateMacWs = allWorkstations.FirstOrDefault(w => w.MacAddress.Equals(macNormalized, StringComparison.OrdinalIgnoreCase));
+                // Performance Optimization: Use database-level indexed query instead of fetching all workstations into memory
+                var duplicateMacWs = await _workstationRepository.FirstOrDefaultAsync(
+                    w => w.MacAddress == macNormalized,
+                    track: false,
+                    cancellationToken);
                 if (duplicateMacWs != null && !duplicateMacWs.PcId.Equals(pcIdUpper, StringComparison.OrdinalIgnoreCase))
                 {
                     return Result<Workstation>.Failure("DUPLICATE_MAC_ADDRESS", $"MAC Address {macNormalized} is already registered under another PC: {duplicateMacWs.PcId}");
                 }
 
-                var existing = allWorkstations.FirstOrDefault(w => w.PcId.Equals(pcIdUpper, StringComparison.OrdinalIgnoreCase));
+                var existing = await _workstationRepository.FirstOrDefaultAsync(
+                    w => w.PcId == pcIdUpper,
+                    track: false,
+                    cancellationToken);
                 Workstation workstation;
 
                 if (existing != null)
