@@ -1,5 +1,6 @@
 using System;
 using Sayra.Backend.Domain.Exceptions;
+using Sayra.Backend.Shared;
 
 namespace Sayra.Backend.Domain
 {
@@ -65,6 +66,101 @@ namespace Sayra.Backend.Domain
         {
             Status = "Closed";
             UpdatedAt = DateTime.UtcNow;
+        }
+
+        public LedgerEntry Credit(
+            Money money,
+            string reference,
+            string entryType = "CREDIT",
+            string? correlationId = null,
+            string? actor = null,
+            string? description = null)
+        {
+            if (!CanTransact())
+            {
+                throw new InvalidDomainException("ACCOUNT_DISABLED", $"Account '{Id}' is in status '{Status}' and cannot process financial operations.");
+            }
+
+            if (money == null || money.Amount <= 0)
+            {
+                throw new InvalidDomainException("INVALID_AMOUNT", "Credit amount must be strictly greater than zero.");
+            }
+
+            if (!string.Equals(money.Currency, Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDomainException("CURRENCY_MISMATCH", $"Cannot credit amount in currency '{money.Currency}' to account in '{Currency}'.");
+            }
+
+            Balance += money.Amount;
+            UpdatedAt = DateTime.UtcNow;
+
+            var entry = new LedgerEntry
+            {
+                GamerAccountId = Id,
+                Amount = money.Amount,
+                Currency = Currency,
+                Direction = "CREDIT",
+                EntryType = entryType,
+                Reference = reference,
+                CorrelationId = correlationId ?? string.Empty,
+                Actor = actor,
+                Description = description,
+                BalanceAfter = Balance,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            entry.NormalizeAndValidate();
+            return entry;
+        }
+
+        public LedgerEntry Debit(
+            Money money,
+            string reference,
+            string entryType = "DEBIT",
+            string? correlationId = null,
+            string? actor = null,
+            string? description = null)
+        {
+            if (!CanTransact())
+            {
+                throw new InvalidDomainException("ACCOUNT_DISABLED", $"Account '{Id}' is in status '{Status}' and cannot process financial operations.");
+            }
+
+            if (money == null || money.Amount <= 0)
+            {
+                throw new InvalidDomainException("INVALID_AMOUNT", "Debit amount must be strictly greater than zero.");
+            }
+
+            if (!string.Equals(money.Currency, Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDomainException("CURRENCY_MISMATCH", $"Cannot debit amount in currency '{money.Currency}' from account in '{Currency}'.");
+            }
+
+            if (Balance < money.Amount)
+            {
+                throw new InvalidDomainException("INSUFFICIENT_BALANCE", $"Insufficient funds. Current balance is {Balance} {Currency}, attempted debit of {money.Amount} {money.Currency}.");
+            }
+
+            Balance -= money.Amount;
+            UpdatedAt = DateTime.UtcNow;
+
+            var entry = new LedgerEntry
+            {
+                GamerAccountId = Id,
+                Amount = money.Amount,
+                Currency = Currency,
+                Direction = "DEBIT",
+                EntryType = entryType,
+                Reference = reference,
+                CorrelationId = correlationId ?? string.Empty,
+                Actor = actor,
+                Description = description,
+                BalanceAfter = Balance,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            entry.NormalizeAndValidate();
+            return entry;
         }
     }
 }

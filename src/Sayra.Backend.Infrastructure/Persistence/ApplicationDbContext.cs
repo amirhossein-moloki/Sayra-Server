@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<Gamer> Gamers { get; set; } = null!;
         public DbSet<GamerCredential> GamerCredentials { get; set; } = null!;
         public DbSet<GamerAccount> GamerAccounts { get; set; } = null!;
+        public DbSet<LedgerEntry> LedgerEntries { get; set; } = null!;
         public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
@@ -94,6 +96,27 @@ namespace Sayra.Backend.Infrastructure.Persistence
                     _currentTransaction = null;
                 }
             }
+        }
+
+        public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
+        {
+            var strategy = Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var result = await operation();
+                    await SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
         }
 
         public override void Dispose()
