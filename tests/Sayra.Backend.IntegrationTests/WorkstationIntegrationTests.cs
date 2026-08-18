@@ -122,12 +122,14 @@ namespace Sayra.Backend.IntegrationTests
 
             var pcId = $"PC-UNIQUE-CONSTR-{Guid.NewGuid():N}";
 
+            string mac1S = Guid.NewGuid().ToString("N")[..8];
+            string mac2S = Guid.NewGuid().ToString("N")[..8];
             var w1 = new Workstation
             {
                 PcId = pcId,
                 SiteId = "SITE-ALPHA",
                 Hostname = "DESKTOP-01",
-                MacAddress = $"AA:BB:CC:DD:EE:{Random.Shared.Next(10, 99)}",
+                MacAddress = $"AA:BB:{mac1S[..2]}:{mac1S[2..4]}:{mac1S[4..6]}:{mac1S[6..8]}".ToUpperInvariant(),
                 IpAddress = "192.168.1.15",
                 Status = "Offline",
                 LastSeen = DateTime.UtcNow
@@ -138,7 +140,7 @@ namespace Sayra.Backend.IntegrationTests
                 PcId = pcId, // DUPLICATE PC ID
                 SiteId = "SITE-BETA",
                 Hostname = "DESKTOP-02",
-                MacAddress = $"AA:BB:CC:DD:EE:{Random.Shared.Next(10, 99)}",
+                MacAddress = $"AA:BB:{mac2S[..2]}:{mac2S[2..4]}:{mac2S[4..6]}:{mac2S[6..8]}".ToUpperInvariant(),
                 IpAddress = "192.168.1.16",
                 Status = "Offline",
                 LastSeen = DateTime.UtcNow
@@ -163,7 +165,8 @@ namespace Sayra.Backend.IntegrationTests
             using var scope = _factory.Services.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            var mac = $"AA:BB:CC:DD:EE:{Random.Shared.Next(10, 99)}";
+            string macS = Guid.NewGuid().ToString("N")[..8];
+            var mac = $"AA:BB:{macS[..2]}:{macS[2..4]}:{macS[4..6]}:{macS[6..8]}".ToUpperInvariant();
 
             var w1 = new Workstation
             {

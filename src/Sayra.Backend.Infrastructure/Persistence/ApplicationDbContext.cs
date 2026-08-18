@@ -29,6 +29,8 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<GamerCredential> GamerCredentials { get; set; } = null!;
         public DbSet<GamerAccount> GamerAccounts { get; set; } = null!;
         public DbSet<LedgerEntry> LedgerEntries { get; set; } = null!;
+        public DbSet<FinancialTransaction> FinancialTransactions { get; set; } = null!;
+        public DbSet<Payment> Payments { get; set; } = null!;
         public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
