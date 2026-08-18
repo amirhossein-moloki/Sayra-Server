@@ -1,0 +1,3 @@
+## 2026-08-18 - Zero-Allocation Cryptographic Operations in .NET 8
+**Learning:** High-frequency cryptographic operations (HMAC-SHA256 signatures, AES-256-CBC envelope encryption, constant-time comparisons) in TCP message framing and authentication handshakes incur noticeable GC pressure when instantiating `HMACSHA256`, `MemoryStream`, and `CryptoStream`. In .NET 8, `HMACSHA256.HashData(key, data)`, `aes.EncryptCbc(...)`, `aes.DecryptCbc(...)`, and `CryptographicOperations.FixedTimeEquals(...)` provide zero-allocation / streamlined primitives.
+**Action:** Always prefer static zero-allocation cryptographic methods (`HMACSHA256.HashData`, `AES.EncryptCbc`) over stream-wrapped disposable primitives for hot paths in network services.
