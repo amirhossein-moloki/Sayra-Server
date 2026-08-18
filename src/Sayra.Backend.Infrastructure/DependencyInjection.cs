@@ -9,6 +9,7 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Gamers;
+using Sayra.Backend.Application.Financial;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Contracts;
@@ -128,6 +129,13 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<AuthenticateGamerCommand, AuthenticateGamerResponseDto>, AuthenticateGamerCommandHandler>();
             services.AddScoped<IQueryHandler<GetGamerQuery, Gamer>, GetGamerQueryHandler>();
             services.AddScoped<IQueryHandler<GetGamerAccountQuery, GamerAccount>, GetGamerAccountQueryHandler>();
+
+            // Financial Account & Ledger Foundation Services
+            services.AddScoped<IFinancialAccountService, FinancialAccountService>();
+            services.AddScoped<ICommandHandler<CreditAccountCommand, LedgerEntryResponseDto>, CreditAccountCommandHandler>();
+            services.AddScoped<ICommandHandler<DebitAccountCommand, LedgerEntryResponseDto>, DebitAccountCommandHandler>();
+            services.AddScoped<IQueryHandler<GetAccountBalanceQuery, AccountBalanceResponseDto>, GetAccountBalanceQueryHandler>();
+            services.AddScoped<IQueryHandler<GetAccountLedgerQuery, System.Collections.Generic.IReadOnlyList<LedgerEntryResponseDto>>, GetAccountLedgerQueryHandler>();
 
             // Reservation Handlers & Validation Service
             services.AddScoped<Sayra.Backend.Application.Reservations.IReservationValidationService, Sayra.Backend.Application.Reservations.ReservationValidationService>();
