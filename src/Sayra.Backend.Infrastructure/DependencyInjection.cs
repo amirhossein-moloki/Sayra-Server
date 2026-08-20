@@ -137,6 +137,12 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<DebitAccountCommand, LedgerEntryResponseDto>, DebitAccountCommandHandler>();
             services.AddScoped<IQueryHandler<GetAccountBalanceQuery, AccountBalanceResponseDto>, GetAccountBalanceQueryHandler>();
             services.AddScoped<IQueryHandler<GetAccountLedgerQuery, System.Collections.Generic.IReadOnlyList<LedgerEntryResponseDto>>, GetAccountLedgerQueryHandler>();
+            services.AddScoped<ICommandHandler<ProcessFinancialTransactionCommand, FinancialTransactionResponseDto>, ProcessFinancialTransactionCommandHandler>();
+            services.AddScoped<ICommandHandler<ReverseFinancialTransactionCommand, FinancialTransactionResponseDto>, ReverseFinancialTransactionCommandHandler>();
+            services.AddScoped<ICommandHandler<CreatePaymentCommand, PaymentResponseDto>, CreatePaymentCommandHandler>();
+            services.AddScoped<IQueryHandler<GetFinancialTransactionQuery, FinancialTransactionResponseDto>, GetFinancialTransactionQueryHandler>();
+            services.AddScoped<IQueryHandler<GetPaymentQuery, PaymentResponseDto>, GetPaymentQueryHandler>();
+            services.AddScoped<IQueryHandler<GetTransactionByIdempotencyKeyQuery, FinancialTransactionResponseDto>, GetTransactionByIdempotencyKeyQueryHandler>();
 
             // Reservation Handlers & Validation Service
             services.AddScoped<Sayra.Backend.Application.Reservations.IReservationValidationService, Sayra.Backend.Application.Reservations.ReservationValidationService>();

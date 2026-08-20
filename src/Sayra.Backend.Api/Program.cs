@@ -59,6 +59,7 @@ namespace Sayra.Backend.Api
 
                 // Configure Controllers with camelCase serialization
                 builder.Services.AddControllers()
+                    .AddApplicationPart(typeof(Sayra.Backend.Api.Controllers.GamersController).Assembly)
                     .AddJsonOptions(options =>
                     {
                         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;

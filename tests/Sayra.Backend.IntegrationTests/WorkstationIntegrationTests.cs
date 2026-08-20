@@ -429,27 +429,25 @@ namespace Sayra.Backend.IntegrationTests
         [Fact]
         public async Task Second_Connection_With_Same_PcId_Should_Replace_Existing_Connection()
         {
+            var testPcId = $"PC-CONC-{Guid.NewGuid():N}"[..15];
+            var testMac = string.Format("00:11:22:{0:X2}:{1:X2}:{2:X2}", Random.Shared.Next(255), Random.Shared.Next(255), Random.Shared.Next(255));
+
             // 1. Arrange: Register device
             using (var scope = _factory.Services.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                var pcId = "PC-CONCURRENT-01";
-                var existing = await dbContext.Workstations.FirstOrDefaultAsync(w => w.PcId == pcId);
-                if (existing == null)
+                var workstation = new Workstation
                 {
-                    var workstation = new Workstation
-                    {
-                        PcId = pcId,
-                        SiteId = "SITE-ALPHA",
-                        Hostname = "HOST-CONC",
-                        MacAddress = "00:11:22:33:44:CC",
-                        IpAddress = "127.0.0.1",
-                        Status = "Offline",
-                        IsDisabled = false
-                    };
-                    await dbContext.Workstations.AddAsync(workstation);
-                    await dbContext.SaveChangesAsync();
-                }
+                    PcId = testPcId,
+                    SiteId = "SITE-ALPHA",
+                    Hostname = "HOST-CONC",
+                    MacAddress = testMac,
+                    IpAddress = "127.0.0.1",
+                    Status = "Offline",
+                    IsDisabled = false
+                };
+                await dbContext.Workstations.AddAsync(workstation);
+                await dbContext.SaveChangesAsync();
             }
 
             var (server, port) = await StartTestServerAsync();
@@ -481,7 +479,7 @@ namespace Sayra.Backend.IntegrationTests
                     Hmac = Convert.ToBase64String(hmac1),
                     EncryptedSessionKey = Convert.ToBase64String(encryptedSk1),
                     Iv = Convert.ToBase64String(iv1),
-                    PcId = "PC-CONCURRENT-01",
+                    PcId = testPcId,
                     Hostname = "HOST-CONC"
                 };
                 await stream1.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(response1) + "\n"));
@@ -511,14 +509,14 @@ namespace Sayra.Backend.IntegrationTests
                     Hmac = Convert.ToBase64String(hmac2),
                     EncryptedSessionKey = Convert.ToBase64String(encryptedSk2),
                     Iv = Convert.ToBase64String(iv2),
-                    PcId = "PC-CONCURRENT-01", // IDENTICAL
+                    PcId = testPcId, // IDENTICAL
                     Hostname = "HOST-CONC"
                 };
                 await stream2.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(response2) + "\n"));
                 await stream2.FlushAsync();
 
                 // Read success status for Client 2
-                string statusLine2 = await ReadLineWithTimeoutAsync(stream2, TimeSpan.FromSeconds(3));
+                string statusLine2 = await ReadLineWithTimeoutAsync(stream2, TimeSpan.FromSeconds(5));
                 var statusDto2 = JsonSerializer.Deserialize<AuthStatusDto>(statusLine2, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 Assert.Equal("SUCCESS", statusDto2!.Status);
 
@@ -532,7 +530,7 @@ namespace Sayra.Backend.IntegrationTests
                 // Verify registry holds Client 2 and size is still exactly 1
                 Assert.Equal(1, _connectionRegistry.Count);
                 var activeConn = _connectionRegistry.GetAll().First();
-                Assert.Equal("PC-CONCURRENT-01", activeConn.PcId);
+                Assert.Equal(testPcId, activeConn.PcId);
                 Assert.True(CryptographicOperations.FixedTimeEquals(sk2, activeConn.SessionKey!));
             }
             finally

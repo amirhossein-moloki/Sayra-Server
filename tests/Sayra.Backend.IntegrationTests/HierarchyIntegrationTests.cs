@@ -88,7 +88,7 @@ namespace Sayra.Backend.IntegrationTests
                     PcId = $"PC-HIER-{Guid.NewGuid():N}"[..18],
                     SiteId = siteDto.Code,
                     Hostname = "DESKTOP-HIER",
-                    MacAddress = $"AA:11:22:33:44:{Random.Shared.Next(10, 99)}",
+                    MacAddress = string.Format("00:11:22:{0:X2}:{1:X2}:{2:X2}", Random.Shared.Next(255), Random.Shared.Next(255), Random.Shared.Next(255)),
                     IpAddress = "10.0.0.100",
                     Status = "OFFLINE"
                 };
