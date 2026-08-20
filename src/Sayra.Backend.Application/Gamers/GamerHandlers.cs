@@ -19,6 +19,8 @@ namespace Sayra.Backend.Application.Gamers
         private readonly IRepository<Gamer> _gamerRepository;
         private readonly IRepository<GamerCredential> _gamerCredentialRepository;
         private readonly IRepository<GamerAccount> _gamerAccountRepository;
+        private readonly IRepository<User> _userRepository;
+        private readonly IRepository<UserCredential> _userCredentialRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IUnitOfWork _unitOfWork;
@@ -27,6 +29,8 @@ namespace Sayra.Backend.Application.Gamers
             IRepository<Gamer> gamerRepository,
             IRepository<GamerCredential> gamerCredentialRepository,
             IRepository<GamerAccount> gamerAccountRepository,
+            IRepository<User> userRepository,
+            IRepository<UserCredential> userCredentialRepository,
             IRepository<AuditEvent> auditEventRepository,
             IPasswordHasher passwordHasher,
             IUnitOfWork unitOfWork)
@@ -34,6 +38,8 @@ namespace Sayra.Backend.Application.Gamers
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
             _gamerAccountRepository = gamerAccountRepository ?? throw new ArgumentNullException(nameof(gamerAccountRepository));
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+            _userCredentialRepository = userCredentialRepository ?? throw new ArgumentNullException(nameof(userCredentialRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -54,6 +60,12 @@ namespace Sayra.Backend.Application.Gamers
                 var usernameLower = command.Username.Trim().ToLowerInvariant();
                 var existingUsername = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == usernameLower, track: false, cancellationToken);
                 if (existingUsername != null)
+                {
+                    return Result<Gamer>.Failure("DUPLICATE_USERNAME", $"Username '{command.Username}' is already taken.");
+                }
+
+                var existingUser = await _userRepository.FirstOrDefaultAsync(u => u.Username.ToLower() == usernameLower, track: false, cancellationToken);
+                if (existingUser != null)
                 {
                     return Result<Gamer>.Failure("DUPLICATE_USERNAME", $"Username '{command.Username}' is already taken.");
                 }
@@ -79,24 +91,53 @@ namespace Sayra.Backend.Application.Gamers
                 };
 
                 gamer.NormalizeAndValidate();
-
                 await _gamerRepository.AddAsync(gamer, cancellationToken);
 
-                // Hash password and store in separate GamerCredential entity
-                var (hash, salt) = _passwordHasher.HashPassword(command.Password);
-                var credential = new GamerCredential
+                // Create associated User identity record
+                var user = new User
+                {
+                    Username = command.Username,
+                    DisplayName = string.IsNullOrWhiteSpace(command.FirstName) && string.IsNullOrWhiteSpace(command.LastName)
+                        ? command.Username
+                        : $"{command.FirstName} {command.LastName}".Trim(),
+                    Email = command.Email,
+                    PhoneNumber = command.PhoneNumber,
+                    Role = UserRole.Gamer,
+                    Status = UserAccountState.Active,
+                    GamerEntityId = gamer.Id
+                };
+
+                user.NormalizeAndValidate();
+                await _userRepository.AddAsync(user, cancellationToken);
+
+                // Hash password with Argon2id and store in UserCredential entity
+                var (hash, salt, algo, parameters) = _passwordHasher.HashPasswordWithDetails(command.Password);
+                var userCredential = new UserCredential
+                {
+                    UserEntityId = user.Id,
+                    PasswordHash = hash,
+                    PasswordSalt = salt,
+                    HashAlgorithm = algo,
+                    HashParameters = parameters,
+                    LastPasswordChangedAt = DateTime.UtcNow
+                };
+
+                await _userCredentialRepository.AddAsync(userCredential, cancellationToken);
+
+                // Store in GamerCredential entity for backward compatibility
+                var gamerCredential = new GamerCredential
                 {
                     GamerEntityId = gamer.Id,
                     CredentialType = "Password",
                     PasswordHash = hash,
                     PasswordSalt = salt,
-                    HashAlgorithm = "PBKDF2",
+                    HashAlgorithm = algo,
                     FailedAttemptCount = 0,
                     IsLocked = false,
                     LastPasswordChangedAt = DateTime.UtcNow
                 };
 
-                await _gamerCredentialRepository.AddAsync(credential, cancellationToken);
+                await _gamerCredentialRepository.AddAsync(gamerCredential, cancellationToken);
 
                 // Create associated GamerAccount integration point
                 var account = new GamerAccount
@@ -109,7 +150,6 @@ namespace Sayra.Backend.Application.Gamers
                 };
 
                 account.NormalizeAndValidate();
-
                 await _gamerAccountRepository.AddAsync(account, cancellationToken);
 
                 // Record Audit Events
@@ -165,13 +205,16 @@ namespace Sayra.Backend.Application.Gamers
     public class UpdateGamerProfileCommandHandler : ICommandHandler<UpdateGamerProfileCommand, Gamer>
     {
         private readonly IRepository<Gamer> _gamerRepository;
+        private readonly IRepository<User> _userRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public UpdateGamerProfileCommandHandler(
             IRepository<Gamer> gamerRepository,
+            IRepository<User> userRepository,
             IUnitOfWork unitOfWork)
         {
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
@@ -215,6 +258,17 @@ namespace Sayra.Backend.Application.Gamers
                 gamer.NormalizeAndValidate();
                 _gamerRepository.Update(gamer);
 
+                // Sync with associated User entity if present
+                var user = await _userRepository.FirstOrDefaultAsync(u => u.GamerEntityId == gamer.Id, track: true, cancellationToken);
+                if (user != null)
+                {
+                    user.Email = gamer.Email;
+                    user.PhoneNumber = gamer.PhoneNumber;
+                    user.DisplayName = $"{gamer.FirstName} {gamer.LastName}".Trim();
+                    user.NormalizeAndValidate();
+                    _userRepository.Update(user);
+                }
+
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return Result<Gamer>.Success(gamer);
@@ -233,15 +287,18 @@ namespace Sayra.Backend.Application.Gamers
     public class DeactivateGamerCommandHandler : ICommandHandler<DeactivateGamerCommand, Gamer>
     {
         private readonly IRepository<Gamer> _gamerRepository;
+        private readonly IRepository<User> _userRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public DeactivateGamerCommandHandler(
             IRepository<Gamer> gamerRepository,
+            IRepository<User> userRepository,
             IRepository<AuditEvent> auditEventRepository,
             IUnitOfWork unitOfWork)
         {
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
@@ -266,6 +323,13 @@ namespace Sayra.Backend.Application.Gamers
 
                 gamer.Deactivate();
                 _gamerRepository.Update(gamer);
+
+                var user = await _userRepository.FirstOrDefaultAsync(u => u.GamerEntityId == gamer.Id, track: true, cancellationToken);
+                if (user != null)
+                {
+                    user.TransitionTo(UserAccountState.Disabled);
+                    _userRepository.Update(user);
+                }
 
                 var auditEvent = new AuditEvent
                 {
@@ -301,17 +365,23 @@ namespace Sayra.Backend.Application.Gamers
     public class ChangeGamerPasswordCommandHandler : ICommandHandler<ChangeGamerPasswordCommand, bool>
     {
         private readonly IRepository<GamerCredential> _gamerCredentialRepository;
+        private readonly IRepository<User> _userRepository;
+        private readonly IRepository<UserCredential> _userCredentialRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IUnitOfWork _unitOfWork;
 
         public ChangeGamerPasswordCommandHandler(
             IRepository<GamerCredential> gamerCredentialRepository,
+            IRepository<User> userRepository,
+            IRepository<UserCredential> userCredentialRepository,
             IRepository<AuditEvent> auditEventRepository,
             IPasswordHasher passwordHasher,
             IUnitOfWork unitOfWork)
         {
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+            _userCredentialRepository = userCredentialRepository ?? throw new ArgumentNullException(nameof(userCredentialRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -329,20 +399,41 @@ namespace Sayra.Backend.Application.Gamers
                     return Result<bool>.Failure(firstError.ErrorCode ?? "VALIDATION_FAILED", firstError.ErrorMessage);
                 }
 
-                var credential = await _gamerCredentialRepository.FirstOrDefaultAsync(c => c.GamerEntityId == command.GamerEntityId, track: true, cancellationToken);
-                if (credential == null)
+                var gamerCredential = await _gamerCredentialRepository.FirstOrDefaultAsync(c => c.GamerEntityId == command.GamerEntityId, track: true, cancellationToken);
+                var user = await _userRepository.FirstOrDefaultAsync(u => u.GamerEntityId == command.GamerEntityId, track: true, cancellationToken);
+                UserCredential? userCredential = null;
+                if (user != null)
+                {
+                    userCredential = await _userCredentialRepository.FirstOrDefaultAsync(uc => uc.UserEntityId == user.Id, track: true, cancellationToken);
+                }
+
+                if (gamerCredential == null && userCredential == null)
                 {
                     return Result<bool>.Failure("NOT_FOUND", $"Gamer credentials for ID '{command.GamerEntityId}' not found.");
                 }
 
-                if (!_passwordHasher.VerifyPassword(command.CurrentPassword, credential.PasswordHash, credential.PasswordSalt))
+                string hash = userCredential?.PasswordHash ?? gamerCredential?.PasswordHash ?? string.Empty;
+                string salt = userCredential?.PasswordSalt ?? gamerCredential?.PasswordSalt ?? string.Empty;
+                string algo = userCredential?.HashAlgorithm ?? gamerCredential?.HashAlgorithm ?? "Argon2id";
+
+                if (!_passwordHasher.VerifyPassword(command.CurrentPassword, hash, salt, algo))
                 {
                     return Result<bool>.Failure("INVALID_CREDENTIALS", "Current password verification failed.");
                 }
 
-                var (newHash, newSalt) = _passwordHasher.HashPassword(command.NewPassword);
-                credential.SetPassword(newHash, newSalt, "PBKDF2");
-                _gamerCredentialRepository.Update(credential);
+                var (newHash, newSalt, newAlgo, newParams) = _passwordHasher.HashPasswordWithDetails(command.NewPassword);
+
+                if (gamerCredential != null)
+                {
+                    gamerCredential.SetPassword(newHash, newSalt, newAlgo);
+                    _gamerCredentialRepository.Update(gamerCredential);
+                }
+
+                if (userCredential != null)
+                {
+                    userCredential.SetPassword(newHash, newSalt, newAlgo, newParams);
+                    _userCredentialRepository.Update(userCredential);
+                }
 
                 var auditEvent = new AuditEvent
                 {
@@ -377,6 +468,8 @@ namespace Sayra.Backend.Application.Gamers
     {
         private readonly IRepository<Gamer> _gamerRepository;
         private readonly IRepository<GamerCredential> _gamerCredentialRepository;
+        private readonly IRepository<User> _userRepository;
+        private readonly IRepository<UserCredential> _userCredentialRepository;
         private readonly IRepository<GamerAccount> _gamerAccountRepository;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IUnitOfWork _unitOfWork;
@@ -384,12 +477,16 @@ namespace Sayra.Backend.Application.Gamers
         public AuthenticateGamerCommandHandler(
             IRepository<Gamer> gamerRepository,
             IRepository<GamerCredential> gamerCredentialRepository,
+            IRepository<User> userRepository,
+            IRepository<UserCredential> userCredentialRepository,
             IRepository<GamerAccount> gamerAccountRepository,
             IPasswordHasher passwordHasher,
             IUnitOfWork unitOfWork)
         {
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+            _userCredentialRepository = userCredentialRepository ?? throw new ArgumentNullException(nameof(userCredentialRepository));
             _gamerAccountRepository = gamerAccountRepository ?? throw new ArgumentNullException(nameof(gamerAccountRepository));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -413,8 +510,12 @@ namespace Sayra.Backend.Application.Gamers
                 }
 
                 var inputLower = command.UsernameOrEmail.Trim().ToLowerInvariant();
-                var gamer = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == inputLower || g.Email.ToLower() == inputLower, track: false, cancellationToken);
-                if (gamer == null)
+
+                // Lookup User and Gamer records
+                var user = await _userRepository.FirstOrDefaultAsync(u => u.Username.ToLower() == inputLower || u.Email.ToLower() == inputLower, track: true, cancellationToken);
+                var gamer = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == inputLower || g.Email.ToLower() == inputLower, track: true, cancellationToken);
+
+                if (user == null && gamer == null)
                 {
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                     {
@@ -424,18 +525,60 @@ namespace Sayra.Backend.Application.Gamers
                     });
                 }
 
-                if (!gamer.CanOperate())
+                if (user != null)
                 {
-                    return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
+                    if (user.Status == UserAccountState.Disabled || user.Status == UserAccountState.Suspended)
                     {
-                        IsSuccess = false,
-                        ErrorCode = "ACCOUNT_DISABLED",
-                        ErrorMessage = $"Gamer account is currently {gamer.Status}."
-                    });
+                        return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
+                        {
+                            IsSuccess = false,
+                            ErrorCode = "ACCOUNT_DISABLED",
+                            ErrorMessage = $"User account is currently {user.Status}."
+                        });
+                    }
+
+                    if (user.IsCurrentlyLockedOut())
+                    {
+                        return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
+                        {
+                            IsSuccess = false,
+                            ErrorCode = "ACCOUNT_LOCKED",
+                            ErrorMessage = "Account is temporarily locked due to too many failed login attempts."
+                        });
+                    }
+                }
+                else if (gamer != null)
+                {
+                    if (!gamer.CanOperate())
+                    {
+                        return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
+                        {
+                            IsSuccess = false,
+                            ErrorCode = "ACCOUNT_DISABLED",
+                            ErrorMessage = $"Gamer account is currently {gamer.Status}."
+                        });
+                    }
                 }
 
-                var credential = await _gamerCredentialRepository.FirstOrDefaultAsync(c => c.GamerEntityId == gamer.Id, track: true, cancellationToken);
-                if (credential == null)
+                // Retrieve credentials
+                UserCredential? userCredential = null;
+                GamerCredential? gamerCredential = null;
+
+                if (user != null)
+                {
+                    userCredential = await _userCredentialRepository.FirstOrDefaultAsync(uc => uc.UserEntityId == user.Id, track: true, cancellationToken);
+                }
+
+                if (gamer != null)
+                {
+                    gamerCredential = await _gamerCredentialRepository.FirstOrDefaultAsync(gc => gc.GamerEntityId == gamer.Id, track: true, cancellationToken);
+                }
+
+                string? hash = userCredential?.PasswordHash ?? gamerCredential?.PasswordHash;
+                string? salt = userCredential?.PasswordSalt ?? gamerCredential?.PasswordSalt;
+                string algo = userCredential?.HashAlgorithm ?? gamerCredential?.HashAlgorithm ?? "Argon2id";
+
+                if (string.IsNullOrEmpty(hash) || string.IsNullOrEmpty(salt))
                 {
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                     {
@@ -445,21 +588,21 @@ namespace Sayra.Backend.Application.Gamers
                     });
                 }
 
-                if (credential.IsCurrentlyLockedOut())
-                {
-                    return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
-                    {
-                        IsSuccess = false,
-                        ErrorCode = "ACCOUNT_LOCKED",
-                        ErrorMessage = "Account is temporarily locked due to too many failed login attempts."
-                    });
-                }
-
-                bool isPasswordValid = _passwordHasher.VerifyPassword(command.Password, credential.PasswordHash, credential.PasswordSalt);
+                bool isPasswordValid = _passwordHasher.VerifyPassword(command.Password, hash, salt, algo);
                 if (!isPasswordValid)
                 {
-                    credential.RecordFailedAttempt(maxAttempts: 5, lockoutDuration: TimeSpan.FromMinutes(15));
-                    _gamerCredentialRepository.Update(credential);
+                    if (user != null)
+                    {
+                        user.RecordFailedLoginAttempt(maxAttempts: 5, lockoutDuration: TimeSpan.FromMinutes(15));
+                        _userRepository.Update(user);
+                    }
+
+                    if (gamerCredential != null)
+                    {
+                        gamerCredential.RecordFailedAttempt(maxAttempts: 5, lockoutDuration: TimeSpan.FromMinutes(15));
+                        _gamerCredentialRepository.Update(gamerCredential);
+                    }
+
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
@@ -470,20 +613,51 @@ namespace Sayra.Backend.Application.Gamers
                     });
                 }
 
-                // Successful login -> Reset failed attempt counters
-                credential.ResetFailedAttempts();
-                _gamerCredentialRepository.Update(credential);
+                // Successful login -> Reset failed attempt counters and record login
+                if (user != null)
+                {
+                    user.RecordSuccessfulLogin();
+                    _userRepository.Update(user);
+                }
 
-                var account = await _gamerAccountRepository.FirstOrDefaultAsync(a => a.GamerEntityId == gamer.Id, track: false, cancellationToken);
+                if (gamerCredential != null)
+                {
+                    gamerCredential.ResetFailedAttempts();
+                    _gamerCredentialRepository.Update(gamerCredential);
+                }
+
+                // Automatic password rehash upgrade if algorithm needs rehash (e.g., legacy PBKDF2 -> Argon2id)
+                if (_passwordHasher.NeedsRehash(algo))
+                {
+                    var (newHash, newSalt, newAlgo, newParams) = _passwordHasher.HashPasswordWithDetails(command.Password);
+
+                    if (userCredential != null)
+                    {
+                        userCredential.SetPassword(newHash, newSalt, newAlgo, newParams);
+                        _userCredentialRepository.Update(userCredential);
+                    }
+
+                    if (gamerCredential != null)
+                    {
+                        gamerCredential.SetPassword(newHash, newSalt, newAlgo);
+                        _gamerCredentialRepository.Update(gamerCredential);
+                    }
+                }
+
+                Guid targetGamerId = gamer?.Id ?? user?.GamerEntityId ?? user?.Id ?? Guid.Empty;
+                string businessId = gamer?.GamerId ?? user?.UserId ?? string.Empty;
+                string username = user?.Username ?? gamer?.Username ?? string.Empty;
+
+                var account = await _gamerAccountRepository.FirstOrDefaultAsync(a => a.GamerEntityId == targetGamerId, track: false, cancellationToken);
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                 {
                     IsSuccess = true,
-                    GamerId = gamer.Id,
-                    GamerBusinessId = gamer.GamerId,
-                    Username = gamer.Username,
+                    GamerId = targetGamerId,
+                    GamerBusinessId = businessId,
+                    Username = username,
                     AccountNumber = account?.AccountNumber
                 });
             }
