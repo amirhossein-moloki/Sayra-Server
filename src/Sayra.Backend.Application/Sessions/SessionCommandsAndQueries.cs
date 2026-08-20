@@ -25,6 +25,11 @@ namespace Sayra.Backend.Application.Sessions
         Guid SessionId,
         string? Reason = null) : ICommand<SessionResponseDto>;
 
+    public record ExtendSessionCommand(
+        Guid SessionId,
+        int AdditionalMinutes,
+        string? IdempotencyKey = null) : ICommand<SessionExtensionResponseDto>;
+
     public record GetSessionQuery(
         Guid SessionId) : IQuery<SessionResponseDto>;
 

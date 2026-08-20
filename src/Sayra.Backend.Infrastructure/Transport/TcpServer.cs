@@ -414,6 +414,81 @@ namespace Sayra.Backend.Infrastructure.Transport
                         await _secureMessageService.SendSecureMessageAsync(session, pongMessage);
                         _logger.LogInformation("Sent PONG back to connection {ConnectionId}.", connection.ConnectionId);
                     }
+                    else if (msgType.Equals("SESSION_COMMAND_REQUEST", StringComparison.OrdinalIgnoreCase) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing SESSION_COMMAND_REQUEST for connection {ConnectionId}...", connection.ConnectionId);
+
+                        try
+                        {
+                            if (root.TryGetProperty("payload", out var payloadProp))
+                            {
+                                var commandPayload = JsonSerializer.Deserialize<Sayra.Backend.Contracts.SessionCommandPayload>(payloadProp.GetRawText(), new JsonSerializerOptions
+                                {
+                                    PropertyNameCaseInsensitive = true
+                                });
+
+                                if (commandPayload != null && !string.IsNullOrEmpty(commandPayload.Action))
+                                {
+                                    using var scope = _serviceScopeFactory.CreateScope();
+                                    string actionUpper = commandPayload.Action.Trim().ToUpperInvariant();
+
+                                    Sayra.Backend.Contracts.SessionResponseDto? sessionResult = null;
+
+                                    if (actionUpper == "START")
+                                    {
+                                        var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Sessions.StartSessionCommand, Sayra.Backend.Contracts.SessionResponseDto>>();
+                                        var res = await handler.HandleAsync(new Sayra.Backend.Application.Sessions.StartSessionCommand(commandPayload.GamerId, commandPayload.WorkstationId, commandPayload.ReservationId), cancellationToken);
+                                        if (res.IsSuccess) sessionResult = res.Value;
+                                    }
+                                    else if (actionUpper == "PAUSE")
+                                    {
+                                        var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Sessions.PauseSessionCommand, Sayra.Backend.Contracts.SessionResponseDto>>();
+                                        var res = await handler.HandleAsync(new Sayra.Backend.Application.Sessions.PauseSessionCommand(commandPayload.SessionId), cancellationToken);
+                                        if (res.IsSuccess) sessionResult = res.Value;
+                                    }
+                                    else if (actionUpper == "RESUME")
+                                    {
+                                        var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Sessions.ResumeSessionCommand, Sayra.Backend.Contracts.SessionResponseDto>>();
+                                        var res = await handler.HandleAsync(new Sayra.Backend.Application.Sessions.ResumeSessionCommand(commandPayload.SessionId), cancellationToken);
+                                        if (res.IsSuccess) sessionResult = res.Value;
+                                    }
+                                    else if (actionUpper == "STOP")
+                                    {
+                                        var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Sessions.StopSessionCommand, Sayra.Backend.Contracts.SessionResponseDto>>();
+                                        var res = await handler.HandleAsync(new Sayra.Backend.Application.Sessions.StopSessionCommand(commandPayload.SessionId), cancellationToken);
+                                        if (res.IsSuccess) sessionResult = res.Value;
+                                    }
+                                    else if (actionUpper == "EXTEND")
+                                    {
+                                        var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Sessions.ExtendSessionCommand, Sayra.Backend.Contracts.SessionExtensionResponseDto>>();
+                                        await handler.HandleAsync(new Sayra.Backend.Application.Sessions.ExtendSessionCommand(commandPayload.SessionId, commandPayload.AdditionalMinutes ?? 30, commandPayload.IdempotencyKey), cancellationToken);
+                                    }
+
+                                    if (sessionResult != null)
+                                    {
+                                        var updateMsg = new Sayra.Backend.Contracts.SessionStateUpdateMessage
+                                        {
+                                            MessageType = "SESSION_STATE_UPDATE",
+                                            SessionId = sessionResult.SessionId,
+                                            GamerId = sessionResult.GamerId,
+                                            WorkstationId = sessionResult.WorkstationId,
+                                            Status = sessionResult.Status,
+                                            ConsumedDuration = TimeSpan.Zero,
+                                            RemainingDuration = null,
+                                            Timestamp = DateTime.UtcNow
+                                        };
+
+                                        await _secureMessageService.SendSecureMessageAsync(session, updateMsg);
+                                        _logger.LogInformation("Sent SESSION_STATE_UPDATE back to connection {ConnectionId} for Session {SessionId}.", connection.ConnectionId, sessionResult.SessionId);
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception cmdEx)
+                        {
+                            _logger.LogWarning(cmdEx, "Failed to execute SESSION_COMMAND_REQUEST on connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
                 }
             }
 

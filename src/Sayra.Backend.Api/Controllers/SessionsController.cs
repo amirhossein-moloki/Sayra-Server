@@ -18,6 +18,7 @@ namespace Sayra.Backend.Api.Controllers
         private readonly ICommandHandler<StopSessionCommand, SessionResponseDto> _stopSessionHandler;
         private readonly ICommandHandler<CancelSessionCommand, SessionResponseDto> _cancelSessionHandler;
         private readonly ICommandHandler<TerminateSessionCommand, SessionResponseDto> _terminateSessionHandler;
+        private readonly ICommandHandler<ExtendSessionCommand, SessionExtensionResponseDto> _extendSessionHandler;
         private readonly IQueryHandler<GetSessionQuery, SessionResponseDto> _getSessionHandler;
         private readonly IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> _getTimingHandler;
         private readonly IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> _getActiveByWorkstationHandler;
@@ -30,6 +31,7 @@ namespace Sayra.Backend.Api.Controllers
             ICommandHandler<StopSessionCommand, SessionResponseDto> stopSessionHandler,
             ICommandHandler<CancelSessionCommand, SessionResponseDto> cancelSessionHandler,
             ICommandHandler<TerminateSessionCommand, SessionResponseDto> terminateSessionHandler,
+            ICommandHandler<ExtendSessionCommand, SessionExtensionResponseDto> extendSessionHandler,
             IQueryHandler<GetSessionQuery, SessionResponseDto> getSessionHandler,
             IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> getTimingHandler,
             IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> getActiveByWorkstationHandler,
@@ -41,6 +43,7 @@ namespace Sayra.Backend.Api.Controllers
             _stopSessionHandler = stopSessionHandler ?? throw new ArgumentNullException(nameof(stopSessionHandler));
             _cancelSessionHandler = cancelSessionHandler ?? throw new ArgumentNullException(nameof(cancelSessionHandler));
             _terminateSessionHandler = terminateSessionHandler ?? throw new ArgumentNullException(nameof(terminateSessionHandler));
+            _extendSessionHandler = extendSessionHandler ?? throw new ArgumentNullException(nameof(extendSessionHandler));
             _getSessionHandler = getSessionHandler ?? throw new ArgumentNullException(nameof(getSessionHandler));
             _getTimingHandler = getTimingHandler ?? throw new ArgumentNullException(nameof(getTimingHandler));
             _getActiveByWorkstationHandler = getActiveByWorkstationHandler ?? throw new ArgumentNullException(nameof(getActiveByWorkstationHandler));
@@ -81,6 +84,36 @@ namespace Sayra.Backend.Api.Controllers
             if (!result.IsSuccess)
             {
                 return NotFound(new { code = result.ErrorCode ?? "NOT_FOUND", message = result.ErrorMessage });
+            }
+
+            return Ok(result.Value!);
+        }
+
+        [HttpPost("{id:guid}/extend")]
+        public async Task<IActionResult> ExtendAsync(Guid id, [FromBody] ExtendSessionRequestDto request, CancellationToken cancellationToken)
+        {
+            if (request == null)
+            {
+                return BadRequest(new { code = "INVALID_PAYLOAD", message = "Request body cannot be empty." });
+            }
+
+            string? idempotencyKey = request.IdempotencyKey;
+            if (string.IsNullOrWhiteSpace(idempotencyKey) && Request.Headers.TryGetValue("Idempotency-Key", out var headerVal))
+            {
+                idempotencyKey = headerVal.ToString();
+            }
+
+            var command = new ExtendSessionCommand(id, request.AdditionalMinutes, idempotencyKey);
+            var result = await _extendSessionHandler.HandleAsync(command, cancellationToken);
+
+            if (!result.IsSuccess)
+            {
+                if (result.ErrorCode == "NOT_FOUND")
+                {
+                    return NotFound(new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                return BadRequest(new { code = result.ErrorCode ?? "EXTEND_SESSION_FAILED", message = result.ErrorMessage });
             }
 
             return Ok(result.Value!);

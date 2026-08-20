@@ -89,6 +89,11 @@ namespace Sayra.Backend.IntegrationTests
 
             // 7. Stop Session
             var stopResponse = await _client.PostAsJsonAsync($"/api/sessions/{createdSession.SessionId}/stop", new { });
+            if (!stopResponse.IsSuccessStatusCode)
+            {
+                var errContent = await stopResponse.Content.ReadAsStringAsync();
+                Assert.Fail($"Stop session returned {stopResponse.StatusCode}: {errContent}");
+            }
             Assert.Equal(HttpStatusCode.OK, stopResponse.StatusCode);
             var stoppedSession = await stopResponse.Content.ReadFromJsonAsync<SessionResponseDto>();
             Assert.NotNull(stoppedSession);

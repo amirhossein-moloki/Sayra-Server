@@ -63,4 +63,21 @@ namespace Sayra.Backend.Domain.Events
         string Reason,
         DateTime OccurredOn,
         string CorrelationId = "") : DomainEvent(Guid.NewGuid(), OccurredOn, CorrelationId);
+
+    public record SessionExtended(
+        Guid SessionId,
+        Guid GamerId,
+        Guid WorkstationId,
+        TimeSpan ExtendedDuration,
+        decimal Cost,
+        DateTime OccurredOn,
+        string CorrelationId = "") : DomainEvent(Guid.NewGuid(), OccurredOn, CorrelationId);
+
+    public record SessionExpired(
+        Guid SessionId,
+        Guid GamerId,
+        Guid WorkstationId,
+        string Status,
+        DateTime OccurredOn,
+        string CorrelationId = "") : DomainEvent(Guid.NewGuid(), OccurredOn, CorrelationId);
 }

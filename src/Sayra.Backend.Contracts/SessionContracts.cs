@@ -14,6 +14,24 @@ namespace Sayra.Backend.Contracts
         public string? Reason { get; set; }
     }
 
+    public class ExtendSessionRequestDto
+    {
+        public int AdditionalMinutes { get; set; }
+        public string? IdempotencyKey { get; set; }
+    }
+
+    public class SessionExtensionResponseDto
+    {
+        public Guid SessionExtensionId { get; set; }
+        public Guid SessionId { get; set; }
+        public TimeSpan ExtendedDuration { get; set; }
+        public decimal Cost { get; set; }
+        public string Currency { get; set; } = "SAY";
+        public string IdempotencyKey { get; set; } = string.Empty;
+        public Guid? FinancialTransactionId { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
     public class SessionResponseDto
     {
         public Guid SessionId { get; set; }
