@@ -132,6 +132,7 @@ namespace Sayra.Backend.Infrastructure
 
             // Financial Account & Ledger Foundation Services
             services.AddScoped<IFinancialAccountService, FinancialAccountService>();
+            services.AddScoped<IFinancialTransactionService, FinancialTransactionService>();
             services.AddScoped<ICommandHandler<CreditAccountCommand, LedgerEntryResponseDto>, CreditAccountCommandHandler>();
             services.AddScoped<ICommandHandler<DebitAccountCommand, LedgerEntryResponseDto>, DebitAccountCommandHandler>();
             services.AddScoped<IQueryHandler<GetAccountBalanceQuery, AccountBalanceResponseDto>, GetAccountBalanceQueryHandler>();
@@ -149,12 +150,14 @@ namespace Sayra.Backend.Infrastructure
             // Session Handlers & Domain Service
             services.AddScoped<Sayra.Backend.Application.Sessions.ISessionStateTransitionService, Sayra.Backend.Application.Sessions.SessionStateTransitionService>();
             services.AddSingleton<Sayra.Backend.Application.Sessions.ISessionTimeCalculator, Sayra.Backend.Application.Sessions.SessionTimeCalculator>();
+            services.AddScoped<Sayra.Backend.Application.Sessions.ISessionExpirationService, Sayra.Backend.Application.Sessions.SessionExpirationService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.StartSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.StartSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.PauseSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.PauseSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.ResumeSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.ResumeSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.StopSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.StopSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.CancelSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.CancelSessionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.TerminateSessionCommand, SessionResponseDto>, Sayra.Backend.Application.Sessions.TerminateSessionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Sessions.ExtendSessionCommand, SessionExtensionResponseDto>, Sayra.Backend.Application.Sessions.ExtendSessionCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionQuery, SessionResponseDto>, Sayra.Backend.Application.Sessions.GetSessionQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionCurrentStateQuery, SessionResponseDto>, Sayra.Backend.Application.Sessions.GetSessionCurrentStateQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Sessions.GetSessionTimingQuery, SessionTimingResponseDto>, Sayra.Backend.Application.Sessions.GetSessionTimingQueryHandler>();

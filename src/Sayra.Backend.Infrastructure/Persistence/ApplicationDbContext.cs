@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Domain.Entities;
 
 namespace Sayra.Backend.Infrastructure.Persistence
 {
@@ -38,6 +39,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<PricingPlan> PricingPlans { get; set; } = null!;
         public DbSet<PricingRule> PricingRules { get; set; } = null!;
         public DbSet<RateSnapshot> RateSnapshots { get; set; } = null!;
+        public DbSet<SessionExtension> SessionExtensions { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -102,9 +104,19 @@ namespace Sayra.Backend.Infrastructure.Persistence
 
         public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
         {
+            if (Database.CurrentTransaction != null)
+            {
+                return await operation();
+            }
+
             var strategy = Database.CreateExecutionStrategy();
             return await strategy.ExecuteAsync(async () =>
             {
+                if (Database.CurrentTransaction != null)
+                {
+                    return await operation();
+                }
+
                 using var transaction = await Database.BeginTransactionAsync(cancellationToken);
                 try
                 {

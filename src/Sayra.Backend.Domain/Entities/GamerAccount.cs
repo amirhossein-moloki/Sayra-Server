@@ -136,7 +136,8 @@ namespace Sayra.Backend.Domain
                 throw new InvalidDomainException("CURRENCY_MISMATCH", $"Cannot debit amount in currency '{money.Currency}' from account in '{Currency}'.");
             }
 
-            if (Balance < money.Amount)
+            var typeUpper = (entryType ?? string.Empty).Trim().ToUpperInvariant();
+            if (typeUpper != "USAGE_CHARGE" && Balance < money.Amount)
             {
                 throw new InvalidDomainException("INSUFFICIENT_BALANCE", $"Insufficient funds. Current balance is {Balance} {Currency}, attempted debit of {money.Amount} {money.Currency}.");
             }

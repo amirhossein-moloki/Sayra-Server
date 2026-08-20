@@ -29,6 +29,22 @@ namespace Sayra.Backend.Application.Sessions
         }
     }
 
+    public class ExtendSessionCommandValidator : AbstractValidator<ExtendSessionCommand>
+    {
+        public ExtendSessionCommandValidator()
+        {
+            RuleFor(x => x.SessionId)
+                .NotEmpty()
+                .WithErrorCode("INVALID_SESSION_ID")
+                .WithMessage("SessionId must not be empty.");
+
+            RuleFor(x => x.AdditionalMinutes)
+                .GreaterThan(0)
+                .WithErrorCode("INVALID_ADDITIONAL_MINUTES")
+                .WithMessage("AdditionalMinutes must be greater than zero.");
+        }
+    }
+
     public class ResumeSessionCommandValidator : AbstractValidator<ResumeSessionCommand>
     {
         public ResumeSessionCommandValidator()
