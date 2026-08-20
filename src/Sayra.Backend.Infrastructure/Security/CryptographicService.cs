@@ -13,24 +13,10 @@ namespace Sayra.Backend.Infrastructure.Security
             if (key == null || key.Length != 32) throw new ArgumentException("Key must be 256 bits (32 bytes).", nameof(key));
             if (iv == null || iv.Length != 16) throw new ArgumentException("IV must be 128 bits (16 bytes).", nameof(iv));
 
-            using (var aes = Aes.Create())
-            {
-                aes.Key = key;
-                aes.IV = iv;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-
-                using (var encryptor = aes.CreateEncryptor(aes.Key, aes.IV))
-                using (var ms = new MemoryStream())
-                {
-                    using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-                    {
-                        cs.Write(plainText, 0, plainText.Length);
-                        cs.FlushFinalBlock();
-                    }
-                    return ms.ToArray();
-                }
-            }
+            // High-performance .NET 8 zero-allocation AES-256-CBC encryption using Aes.EncryptCbc
+            using var aes = Aes.Create();
+            aes.Key = key;
+            return aes.EncryptCbc(plainText, iv, PaddingMode.PKCS7);
         }
 
         public byte[] DecryptAes256Cbc(byte[] cipherText, byte[] key, byte[] iv)
@@ -39,24 +25,10 @@ namespace Sayra.Backend.Infrastructure.Security
             if (key == null || key.Length != 32) throw new ArgumentException("Key must be 256 bits (32 bytes).", nameof(key));
             if (iv == null || iv.Length != 16) throw new ArgumentException("IV must be 128 bits (16 bytes).", nameof(iv));
 
-            using (var aes = Aes.Create())
-            {
-                aes.Key = key;
-                aes.IV = iv;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-
-                using (var decryptor = aes.CreateDecryptor(aes.Key, aes.IV))
-                using (var ms = new MemoryStream())
-                {
-                    using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Write))
-                    {
-                        cs.Write(cipherText, 0, cipherText.Length);
-                        cs.FlushFinalBlock();
-                    }
-                    return ms.ToArray();
-                }
-            }
+            // High-performance .NET 8 zero-allocation AES-256-CBC decryption using Aes.DecryptCbc
+            using var aes = Aes.Create();
+            aes.Key = key;
+            return aes.DecryptCbc(cipherText, iv, PaddingMode.PKCS7);
         }
 
         public byte[] ComputeHmacSha256(byte[] data, byte[] key)
@@ -64,10 +36,8 @@ namespace Sayra.Backend.Infrastructure.Security
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (key == null) throw new ArgumentNullException(nameof(key));
 
-            using (var hmac = new HMACSHA256(key))
-            {
-                return hmac.ComputeHash(data);
-            }
+            // High-performance zero-allocation static HMAC-SHA256 calculation
+            return HMACSHA256.HashData(key, data);
         }
 
         public bool VerifyHmacSha256(byte[] data, byte[] key, byte[] hash)
@@ -77,7 +47,7 @@ namespace Sayra.Backend.Infrastructure.Security
             if (hash == null) throw new ArgumentNullException(nameof(hash));
 
             var computed = ComputeHmacSha256(data, key);
-            return CryptographicEquals(computed, hash);
+            return CryptographicOperations.FixedTimeEquals(computed, hash);
         }
 
         public byte[] SignDataRsa(byte[] data, string privateKeyPem)
@@ -107,13 +77,8 @@ namespace Sayra.Backend.Infrastructure.Security
 
         private static bool CryptographicEquals(byte[] a, byte[] b)
         {
-            if (a.Length != b.Length) return false;
-            int result = 0;
-            for (int i = 0; i < a.Length; i++)
-            {
-                result |= a[i] ^ b[i];
-            }
-            return result == 0;
+            // Use Framework's hardware-optimized constant-time equality check
+            return CryptographicOperations.FixedTimeEquals(a, b);
         }
     }
 }
