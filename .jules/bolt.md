@@ -1,0 +1,3 @@
+## 2026-08-21 - High-Frequency Cryptographic Allocation Optimization
+**Learning:** In .NET 8, legacy cryptographic implementations using `MemoryStream`, `CryptoStream`, `CreateEncryptor`/`CreateDecryptor`, `new HMACSHA256()`, and custom C# loops allocate disposable wrapper objects and intermediate byte arrays on every call. Using .NET 8 direct methods (`aes.EncryptCbc`, `aes.DecryptCbc`, `HMACSHA256.HashData`, and `CryptographicOperations.FixedTimeEquals`) eliminates wrapper allocations and utilizes hardware SIMD acceleration.
+**Action:** Always prefer direct zero-allocation static methods in .NET 8 for high-frequency cryptographic primitives used in networking/framing streams.
