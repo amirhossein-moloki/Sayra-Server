@@ -96,7 +96,9 @@ namespace Sayra.Backend.Api
 
                 app.UseRouting();
 
-                // Authentication and Authorization (empty placeholders for stage 03+)
+                // User Principal Resolution Middleware
+                app.UseMiddleware<UserPrincipalMiddleware>();
+
                 app.UseAuthorization();
 
                 // Map Controllers (including Health endpoints)

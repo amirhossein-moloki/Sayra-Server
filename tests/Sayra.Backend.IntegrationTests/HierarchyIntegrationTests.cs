@@ -23,7 +23,10 @@ namespace Sayra.Backend.IntegrationTests
         {
             EnvLoader.Load();
             _factory = factory;
+            TestAdminSeeder.EnsureAdminUserCreatedAsync(factory).GetAwaiter().GetResult();
             _client = factory.CreateClient();
+            _client.DefaultRequestHeaders.Add("X-User-Id", TestAdminSeeder.AdminUserId.ToString());
+            _client.DefaultRequestHeaders.Add("X-User-Role", "Administrator");
         }
 
         [Fact]

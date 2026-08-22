@@ -2,6 +2,11 @@ using System;
 
 namespace Sayra.Backend.Contracts
 {
+    public class CancelReservationRequestDto
+    {
+        public string? Reason { get; set; }
+    }
+
     public class CreateReservationRequestDto
     {
         public Guid GamerId { get; set; }
