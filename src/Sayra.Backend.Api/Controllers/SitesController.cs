@@ -2,8 +2,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Locations;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 
@@ -25,6 +27,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost]
+        [HasPermission(PermissionCatalog.ManageUsers)]
         public async Task<IActionResult> CreateAsync([FromBody] CreateSiteRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
@@ -73,6 +76,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}")]
+        [HasPermission(PermissionCatalog.ManageUsers)]
         public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         {
             var query = new GetSiteQuery { SiteId = id };

@@ -42,6 +42,10 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<PricingRule> PricingRules { get; set; } = null!;
         public DbSet<RateSnapshot> RateSnapshots { get; set; } = null!;
         public DbSet<SessionExtension> SessionExtensions { get; set; } = null!;
+        public DbSet<Role> Roles { get; set; } = null!;
+        public DbSet<Permission> Permissions { get; set; } = null!;
+        public DbSet<UserRoleEntity> UserRoles { get; set; } = null!;
+        public DbSet<RolePermission> RolePermissions { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

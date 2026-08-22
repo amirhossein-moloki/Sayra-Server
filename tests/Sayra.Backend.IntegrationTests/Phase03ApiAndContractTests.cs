@@ -17,7 +17,10 @@ namespace Sayra.Backend.IntegrationTests
         public Phase03ApiAndContractTests(WebApplicationFactory<Program> factory)
         {
             EnvLoader.Load();
+            TestAdminSeeder.EnsureAdminUserCreatedAsync(factory).GetAwaiter().GetResult();
             _client = factory.CreateClient();
+            _client.DefaultRequestHeaders.Add("X-User-Id", TestAdminSeeder.AdminUserId.ToString());
+            _client.DefaultRequestHeaders.Add("X-User-Role", "Administrator");
         }
 
         [Fact]

@@ -2,7 +2,9 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Contracts;
 
@@ -24,6 +26,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/assignment")]
+        [HasPermission(PermissionCatalog.ManageWorkstations)]
         public async Task<IActionResult> AssignAsync(Guid id, [FromBody] AssignWorkstationRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
@@ -64,6 +67,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}/assignment")]
+        [HasPermission(PermissionCatalog.ViewWorkstations)]
         public async Task<IActionResult> GetAssignmentAsync(Guid id, CancellationToken cancellationToken)
         {
             var query = new GetWorkstationAssignmentQuery { WorkstationId = id };

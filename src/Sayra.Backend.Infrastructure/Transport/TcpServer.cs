@@ -430,7 +430,48 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 if (commandPayload != null && !string.IsNullOrEmpty(commandPayload.Action))
                                 {
                                     using var scope = _serviceScopeFactory.CreateScope();
+                                    var authService = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+                                    var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
+
                                     string actionUpper = commandPayload.Action.Trim().ToUpperInvariant();
+
+                                    var pcIdUpper = connection.PcId?.Trim().ToUpperInvariant() ?? "";
+                                    var workstation = dbContext.Workstations.FirstOrDefault(w => w.PcId == pcIdUpper);
+
+                                    var devicePrincipal = new UserPrincipal
+                                    {
+                                        IsAuthenticated = true,
+                                        PcId = connection.PcId,
+                                        OrganizationId = workstation?.OrganizationEntityId,
+                                        SiteId = workstation?.SiteEntityId,
+                                        Roles = new List<string> { RoleCatalog.Gamer },
+                                        Permissions = new List<string>
+                                        {
+                                            PermissionCatalog.StartSession,
+                                            PermissionCatalog.StopSession,
+                                            PermissionCatalog.PauseSession,
+                                            PermissionCatalog.ResumeSession,
+                                            PermissionCatalog.ExtendSession
+                                        }
+                                    };
+
+                                    string requiredPerm = actionUpper switch
+                                    {
+                                        "START" => PermissionCatalog.StartSession,
+                                        "PAUSE" => PermissionCatalog.PauseSession,
+                                        "RESUME" => PermissionCatalog.ResumeSession,
+                                        "STOP" => PermissionCatalog.StopSession,
+                                        "EXTEND" => PermissionCatalog.ExtendSession,
+                                        _ => PermissionCatalog.StartSession
+                                    };
+
+                                    var authResult = await authService.AuthorizeAsync(devicePrincipal, requiredPerm, workstation, cancellationToken);
+                                    if (!authResult.IsAllowed)
+                                    {
+                                        _logger.LogWarning("TCP Authorization Failure: Connection {ConnectionId} for device {PcId} failed authorization for {Action}: {Reason}",
+                                            connection.ConnectionId, connection.PcId, actionUpper, authResult.FailureReason);
+                                        return;
+                                    }
 
                                     Sayra.Backend.Contracts.SessionResponseDto? sessionResult = null;
 

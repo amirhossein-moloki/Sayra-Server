@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Pricing;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
 
 namespace Sayra.Backend.Api.Controllers
@@ -40,6 +42,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("plans")]
+        [HasPermission(PermissionCatalog.ManagePricing)]
         public async Task<IActionResult> CreatePlanAsync([FromBody] CreatePricingPlanRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
@@ -65,6 +68,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("plans/{id:guid}/rules")]
+        [HasPermission(PermissionCatalog.ManagePricing)]
         public async Task<IActionResult> CreateRuleAsync(Guid id, [FromBody] CreatePricingRuleRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
@@ -108,6 +112,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("plans/{id:guid}/activate")]
+        [HasPermission(PermissionCatalog.ManagePricing)]
         public async Task<IActionResult> ActivatePlanAsync(Guid id, CancellationToken cancellationToken)
         {
             var command = new ActivatePricingPlanCommand(id);
@@ -127,6 +132,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("plans/{id:guid}/deactivate")]
+        [HasPermission(PermissionCatalog.ManagePricing)]
         public async Task<IActionResult> DeactivatePlanAsync(Guid id, CancellationToken cancellationToken)
         {
             var command = new DeactivatePricingPlanCommand(id);
@@ -146,6 +152,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("plans/{id:guid}")]
+        [HasPermission(PermissionCatalog.ViewPricing)]
         public async Task<IActionResult> GetPlanByIdAsync(Guid id, CancellationToken cancellationToken)
         {
             var query = new GetPricingPlanQuery(id);
@@ -160,6 +167,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("plans/{id:guid}/rules")]
+        [HasPermission(PermissionCatalog.ViewPricing)]
         public async Task<IActionResult> GetRulesAsync(Guid id, CancellationToken cancellationToken)
         {
             var query = new GetPricingRulesQuery(id);
@@ -174,6 +182,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("resolve")]
+        [HasPermission(PermissionCatalog.ViewPricing)]
         public async Task<IActionResult> ResolveRateAsync(
             [FromQuery] Guid siteId,
             [FromQuery] Guid? zoneId,
