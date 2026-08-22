@@ -171,11 +171,8 @@ namespace Sayra.Backend.Infrastructure.Transport
                 byte[] signatureInputBytes = Encoding.UTF8.GetBytes(signatureInput);
                 byte[] masterKeyBytes = Encoding.UTF8.GetBytes(masterKey);
 
-                byte[] signatureBytes;
-                using (var hmac = new HMACSHA256(masterKeyBytes))
-                {
-                    signatureBytes = hmac.ComputeHash(signatureInputBytes);
-                }
+                // High-performance zero-allocation static HMAC-SHA256 calculation
+                byte[] signatureBytes = HMACSHA256.HashData(masterKeyBytes, signatureInputBytes);
                 string signatureBase64 = Convert.ToBase64String(signatureBytes);
 
                 // Prepare DiscoveryResponse
