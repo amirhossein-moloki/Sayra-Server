@@ -3,20 +3,20 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Konscious.Security.Cryptography;
+using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Security;
+using Sayra.Backend.Infrastructure.Configuration.Options;
 
 namespace Sayra.Backend.Infrastructure.Security
 {
     public class PasswordHasher : IPasswordHasher
     {
-        private const int SaltSize = 16; // 128 bits
-        private const int KeySize = 32;  // 256 bits
-        private const int ArgonDegreeOfParallelism = 2;
-        private const int ArgonMemorySizeKb = 19456; // 19MB
-        private const int ArgonIterations = 2;
+        private readonly SecurityOptions _options;
 
-        private const int Pbkdf2Iterations = 10000;
-        private const int Pbkdf2KeySize = 32;
+        public PasswordHasher(IOptions<SecurityOptions>? options = null)
+        {
+            _options = options?.Value ?? new SecurityOptions();
+        }
 
         public (string Hash, string Salt) HashPassword(string password)
         {
@@ -31,32 +31,48 @@ namespace Sayra.Backend.Infrastructure.Security
                 throw new ArgumentNullException(nameof(password), "Password cannot be null or empty.");
             }
 
-            byte[] saltBytes = RandomNumberGenerator.GetBytes(SaltSize);
-            byte[] hashBytes = ComputeArgon2id(password, saltBytes, ArgonDegreeOfParallelism, ArgonMemorySizeKb, ArgonIterations, KeySize);
+            if (password.Length > _options.MaxPasswordLength)
+            {
+                throw new ArgumentException($"Password length exceeds maximum allowed length of {_options.MaxPasswordLength} characters.", nameof(password));
+            }
+
+            byte[] saltBytes = RandomNumberGenerator.GetBytes(_options.SaltSize);
+            byte[] hashBytes = ComputeArgon2id(
+                password,
+                saltBytes,
+                _options.ArgonDegreeOfParallelism,
+                _options.ArgonMemorySizeKb,
+                _options.ArgonIterations,
+                _options.KeySize);
 
             var parametersJson = JsonSerializer.Serialize(new
             {
-                DegreeOfParallelism = ArgonDegreeOfParallelism,
-                MemorySize = ArgonMemorySizeKb,
-                Iterations = ArgonIterations
+                DegreeOfParallelism = _options.ArgonDegreeOfParallelism,
+                MemorySize = _options.ArgonMemorySizeKb,
+                Iterations = _options.ArgonIterations
             });
 
             return (
                 Convert.ToBase64String(hashBytes),
                 Convert.ToBase64String(saltBytes),
-                "Argon2id",
+                _options.PasswordHashAlgorithm,
                 parametersJson
             );
         }
 
         public bool VerifyPassword(string password, string hash, string salt)
         {
-            return VerifyPassword(password, hash, salt, "Argon2id");
+            return VerifyPassword(password, hash, salt, _options.PasswordHashAlgorithm);
         }
 
         public bool VerifyPassword(string password, string hash, string salt, string algorithm)
         {
             if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(hash) || string.IsNullOrWhiteSpace(salt))
+            {
+                return false;
+            }
+
+            if (password.Length > _options.MaxPasswordLength)
             {
                 return false;
             }
@@ -75,32 +91,81 @@ namespace Sayra.Backend.Infrastructure.Security
 
             if (string.Equals(algorithm, "PBKDF2", StringComparison.OrdinalIgnoreCase))
             {
-                byte[] computedPbkdf2 = Rfc2898DeriveBytes.Pbkdf2(
-                    password,
-                    saltBytes,
-                    Pbkdf2Iterations,
-                    HashAlgorithmName.SHA256,
-                    Pbkdf2KeySize);
+                try
+                {
+                    byte[] computedPbkdf2 = Rfc2898DeriveBytes.Pbkdf2(
+                        password,
+                        saltBytes,
+                        _options.Pbkdf2Iterations,
+                        HashAlgorithmName.SHA256,
+                        expectedHashBytes.Length > 0 ? expectedHashBytes.Length : _options.KeySize);
 
-                return CryptographicOperations.FixedTimeEquals(expectedHashBytes, computedPbkdf2);
+                    return CryptographicOperations.FixedTimeEquals(expectedHashBytes, computedPbkdf2);
+                }
+                catch
+                {
+                    return false;
+                }
             }
 
-            // Default to Argon2id
-            try
+            if (string.Equals(algorithm, "Argon2id", StringComparison.OrdinalIgnoreCase))
             {
-                byte[] computedArgon = ComputeArgon2id(password, saltBytes, ArgonDegreeOfParallelism, ArgonMemorySizeKb, ArgonIterations, expectedHashBytes.Length);
-                return CryptographicOperations.FixedTimeEquals(expectedHashBytes, computedArgon);
+                try
+                {
+                    byte[] computedArgon = ComputeArgon2id(
+                        password,
+                        saltBytes,
+                        _options.ArgonDegreeOfParallelism,
+                        _options.ArgonMemorySizeKb,
+                        _options.ArgonIterations,
+                        expectedHashBytes.Length);
+
+                    return CryptographicOperations.FixedTimeEquals(expectedHashBytes, computedArgon);
+                }
+                catch
+                {
+                    return false;
+                }
             }
-            catch
-            {
-                return false;
-            }
+
+            // Unsupported algorithm fails closed
+            return false;
         }
 
         public bool NeedsRehash(string algorithm)
         {
+            return NeedsRehash(algorithm, null);
+        }
+
+        public bool NeedsRehash(string algorithm, string? parameters)
+        {
             if (string.IsNullOrWhiteSpace(algorithm)) return true;
-            return !string.Equals(algorithm, "Argon2id", StringComparison.OrdinalIgnoreCase);
+
+            if (!string.Equals(algorithm, _options.PasswordHashAlgorithm, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(parameters))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(parameters);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("DegreeOfParallelism", out var pProp) && pProp.GetInt32() != _options.ArgonDegreeOfParallelism)
+                        return true;
+                    if (root.TryGetProperty("MemorySize", out var mProp) && mProp.GetInt32() != _options.ArgonMemorySizeKb)
+                        return true;
+                    if (root.TryGetProperty("Iterations", out var iProp) && iProp.GetInt32() != _options.ArgonIterations)
+                        return true;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static byte[] ComputeArgon2id(string password, byte[] salt, int parallelism, int memoryKb, int iterations, int outputLength)

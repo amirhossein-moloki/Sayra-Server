@@ -12,6 +12,7 @@ namespace Sayra.Backend.Domain
         public string HashParameters { get; set; } = string.Empty;
         public DateTime CredentialCreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LastPasswordChangedAt { get; set; }
+        public uint RowVersion { get; set; }
 
         public User? User { get; set; }
 

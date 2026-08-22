@@ -512,8 +512,8 @@ namespace Sayra.Backend.Application.Gamers
                 var inputLower = command.UsernameOrEmail.Trim().ToLowerInvariant();
 
                 // Lookup User and Gamer records
-                var user = await _userRepository.FirstOrDefaultAsync(u => u.Username.ToLower() == inputLower || u.Email.ToLower() == inputLower, track: true, cancellationToken);
-                var gamer = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == inputLower || g.Email.ToLower() == inputLower, track: true, cancellationToken);
+                var user = await _userRepository.FirstOrDefaultAsync(u => u.Username.ToLower() == inputLower || (u.Email != null && u.Email.ToLower() == inputLower), track: true, cancellationToken);
+                var gamer = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == inputLower || (g.Email != null && g.Email.ToLower() == inputLower), track: true, cancellationToken);
 
                 if (user == null && gamer == null)
                 {
@@ -626,8 +626,8 @@ namespace Sayra.Backend.Application.Gamers
                     _gamerCredentialRepository.Update(gamerCredential);
                 }
 
-                // Automatic password rehash upgrade if algorithm needs rehash (e.g., legacy PBKDF2 -> Argon2id)
-                if (_passwordHasher.NeedsRehash(algo))
+                // Automatic password rehash upgrade if algorithm or parameters need rehash
+                if (_passwordHasher.NeedsRehash(algo, userCredential?.HashParameters))
                 {
                     var (newHash, newSalt, newAlgo, newParams) = _passwordHasher.HashPasswordWithDetails(command.Password);
 

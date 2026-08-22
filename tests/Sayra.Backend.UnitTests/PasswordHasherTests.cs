@@ -1,3 +1,7 @@
+using System;
+using Microsoft.Extensions.Options;
+using Sayra.Backend.Infrastructure.Configuration;
+using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Infrastructure.Security;
 using Xunit;
 
@@ -59,7 +63,6 @@ namespace Sayra.Backend.UnitTests
         public void VerifyPassword_BackwardCompatiblePBKDF2_ShouldVerifySuccessfully()
         {
             var password = "LegacyPassword123!";
-            // Simulating PBKDF2 hash
             var (hash, salt) = CreateLegacyPbkdf2Hash(password);
 
             bool isValid = _hasher.VerifyPassword(password, hash, salt, "PBKDF2");
@@ -69,12 +72,66 @@ namespace Sayra.Backend.UnitTests
         }
 
         [Fact]
-        public void NeedsRehash_ShouldReturnFalseForArgon2id()
+        public void NeedsRehash_ShouldReturnFalseForArgon2idWithCurrentParams()
         {
             Assert.False(_hasher.NeedsRehash("Argon2id"));
             Assert.True(_hasher.NeedsRehash("PBKDF2"));
             Assert.True(_hasher.NeedsRehash("SHA256"));
             Assert.True(_hasher.NeedsRehash(""));
+        }
+
+        [Fact]
+        public void NeedsRehash_WithOutdatedParameters_ShouldReturnTrue()
+        {
+            string outdatedParams = "{\"DegreeOfParallelism\":1,\"MemorySize\":8192,\"Iterations\":1}";
+            Assert.True(_hasher.NeedsRehash("Argon2id", outdatedParams));
+        }
+
+        [Fact]
+        public void HashPassword_NullOrEmpty_ShouldThrowArgumentException()
+        {
+            Assert.Throws<ArgumentNullException>(() => _hasher.HashPasswordWithDetails(""));
+            Assert.Throws<ArgumentNullException>(() => _hasher.HashPasswordWithDetails(null!));
+        }
+
+        [Fact]
+        public void HashPassword_ExceedingMaxPasswordLength_ShouldThrowArgumentException()
+        {
+            string longPassword = new string('A', 200);
+            Assert.Throws<ArgumentException>(() => _hasher.HashPasswordWithDetails(longPassword));
+        }
+
+        [Fact]
+        public void VerifyPassword_ExceedingMaxPasswordLength_ShouldReturnFalse()
+        {
+            var (hash, salt, algo, _) = _hasher.HashPasswordWithDetails("ValidPassword123!");
+            string longPassword = new string('A', 200);
+
+            Assert.False(_hasher.VerifyPassword(longPassword, hash, salt, algo));
+        }
+
+        [Fact]
+        public void VerifyPassword_MalformedHashOrSalt_ShouldFailClosed()
+        {
+            Assert.False(_hasher.VerifyPassword("Password123!", "not-base64-hash!!!", "not-base64-salt!!!", "Argon2id"));
+        }
+
+        [Fact]
+        public void VerifyPassword_UnsupportedAlgorithm_ShouldFailClosed()
+        {
+            var (hash, salt, _, _) = _hasher.HashPasswordWithDetails("Password123!");
+            Assert.False(_hasher.VerifyPassword("Password123!", hash, salt, "UNSUPPORTED_ALGO"));
+        }
+
+        [Fact]
+        public void ConfigurationValidator_InvalidSecurityOptions_ShouldThrow()
+        {
+            var invalidOptions = new SecurityOptions
+            {
+                ArgonMemorySizeKb = 100 // Less than min 8192
+            };
+
+            Assert.Throws<InvalidOperationException>(() => ConfigurationValidator.ValidateSecurityOptions(invalidOptions));
         }
 
         private static (string Hash, string Salt) CreateLegacyPbkdf2Hash(string password)

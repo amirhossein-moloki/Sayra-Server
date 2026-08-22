@@ -30,6 +30,9 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(uc => uc.HashParameters)
                 .HasMaxLength(1000);
 
+            builder.Property(uc => uc.RowVersion)
+                .IsRowVersion();
+
             builder.HasIndex(uc => uc.UserEntityId)
                 .IsUnique()
                 .HasDatabaseName("IX_UserCredentials_UserEntityId");
