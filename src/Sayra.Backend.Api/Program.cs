@@ -51,8 +51,9 @@ namespace Sayra.Backend.Api
                 var redisOptions = builder.Configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>() ?? new RedisOptions();
                 var serverOptions = builder.Configuration.GetSection(ServerOptions.SectionName).Get<ServerOptions>() ?? new ServerOptions();
                 var discoveryOptions = builder.Configuration.GetSection(DiscoveryOptions.SectionName).Get<DiscoveryOptions>() ?? new DiscoveryOptions();
+                var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
 
-                ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions);
+                ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions, securityOptions);
 
                 // Add Infrastructure dependencies
                 builder.Services.AddInfrastructure(builder.Configuration);

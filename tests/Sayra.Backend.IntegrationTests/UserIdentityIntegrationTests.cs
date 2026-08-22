@@ -226,5 +226,59 @@ namespace Sayra.Backend.IntegrationTests
             Assert.Equal("Argon2id", rehashedCred.HashAlgorithm);
             Assert.NotEqual(pbkdf2Hash, rehashedCred.PasswordHash);
         }
+
+        [Fact]
+        public async Task UserCredential_OptimisticConcurrency_Protection()
+        {
+            Guid userId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var userRepo = scope.ServiceProvider.GetRequiredService<IRepository<User>>();
+                var credRepo = scope.ServiceProvider.GetRequiredService<IRepository<UserCredential>>();
+                var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                string uniqueKey = Guid.NewGuid().ToString("N").Substring(0, 8);
+                var user = new User
+                {
+                    Username = $"conc_{uniqueKey}",
+                    DisplayName = "Concurrent User",
+                    Role = UserRole.Operator,
+                    Status = UserAccountState.Active
+                };
+                user.NormalizeAndValidate();
+                await userRepo.AddAsync(user);
+
+                var (hash, salt, algo, paramsJson) = hasher.HashPasswordWithDetails("InitialPass123!");
+                var cred = new UserCredential
+                {
+                    UserEntityId = user.Id,
+                    PasswordHash = hash,
+                    PasswordSalt = salt,
+                    HashAlgorithm = algo,
+                    HashParameters = paramsJson
+                };
+                await credRepo.AddAsync(cred);
+                await uow.SaveChangesAsync();
+                userId = user.Id;
+            }
+
+            // Read the same credential in two separate contexts
+            using var scope1 = _factory.Services.CreateScope();
+            var db1 = scope1.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var cred1 = await db1.UserCredentials.FirstAsync(c => c.UserEntityId == userId);
+
+            using var scope2 = _factory.Services.CreateScope();
+            var db2 = scope2.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var cred2 = await db2.UserCredentials.FirstAsync(c => c.UserEntityId == userId);
+
+            // Update first context
+            cred1.SetPassword("NewPass111!", "newSalt111", "Argon2id");
+            await db1.SaveChangesAsync();
+
+            // Attempt to update second context with stale RowVersion -> Should throw DbUpdateConcurrencyException
+            cred2.SetPassword("NewPass222!", "newSalt222", "Argon2id");
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(async () => await db2.SaveChangesAsync());
+        }
     }
 }

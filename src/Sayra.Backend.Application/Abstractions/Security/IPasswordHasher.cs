@@ -7,5 +7,6 @@ namespace Sayra.Backend.Application.Abstractions.Security
         bool VerifyPassword(string password, string hash, string salt);
         bool VerifyPassword(string password, string hash, string salt, string algorithm);
         bool NeedsRehash(string algorithm);
+        bool NeedsRehash(string algorithm, string? parameters);
     }
 }
