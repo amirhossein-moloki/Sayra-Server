@@ -60,6 +60,9 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.HasIndex(u => new { u.Role, u.Status })
                 .HasDatabaseName("IX_Users_Role_Status");
 
+            builder.Property(u => u.OrganizationEntityId);
+            builder.Property(u => u.SiteEntityId);
+
             builder.HasOne<Gamer>()
                 .WithMany()
                 .HasForeignKey(u => u.GamerEntityId)

@@ -3,8 +3,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Financial;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
 
 namespace Sayra.Backend.Api.Controllers
@@ -31,6 +33,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost]
+        [HasPermission(PermissionCatalog.ManageFinancialData)]
         public async Task<IActionResult> ProcessTransactionAsync([FromBody] ProcessTransactionRequestDto request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader, CancellationToken cancellationToken = default)
         {
             if (request == null)
@@ -75,6 +78,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}")]
+        [HasPermission(PermissionCatalog.ViewFinancialData)]
         public async Task<IActionResult> GetTransactionByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             var query = new GetFinancialTransactionQuery { TransactionId = id };
@@ -94,6 +98,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("idempotency/{key}")]
+        [HasPermission(PermissionCatalog.ViewFinancialData)]
         public async Task<IActionResult> GetTransactionByIdempotencyKeyAsync(string key, CancellationToken cancellationToken = default)
         {
             var query = new GetTransactionByIdempotencyKeyQuery { IdempotencyKey = key };
@@ -113,6 +118,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/reverse")]
+        [HasPermission(PermissionCatalog.ManageFinancialData)]
         public async Task<IActionResult> ReverseTransactionAsync(Guid id, [FromBody] ReverseTransactionRequestDto request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader, CancellationToken cancellationToken = default)
         {
             if (request == null)

@@ -20,6 +20,8 @@ namespace Sayra.Backend.Domain
         public DateTime? LockedUntil { get; set; }
 
         public Guid? GamerEntityId { get; set; }
+        public Guid? OrganizationEntityId { get; set; }
+        public Guid? SiteEntityId { get; set; }
         public uint RowVersion { get; set; }
 
         public void NormalizeAndValidate()

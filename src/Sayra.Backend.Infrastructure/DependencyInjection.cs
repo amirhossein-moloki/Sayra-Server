@@ -98,8 +98,14 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
             services.AddSingleton<ISecureMessageService, SecureMessageService>();
             services.AddSingleton<IPasswordHasher, PasswordHasher>();
+            services.AddScoped<IAuthorizationService, AuthorizationService>();
 
             // 5. Command & Query Handlers
+            services.AddScoped<ICommandHandler<AssignRoleToUserCommand, bool>, RbacHandlers>();
+            services.AddScoped<ICommandHandler<RemoveRoleFromUserCommand, bool>, RbacHandlers>();
+            services.AddScoped<ICommandHandler<AssignPermissionToRoleCommand, bool>, RbacHandlers>();
+            services.AddScoped<ICommandHandler<RemovePermissionFromRoleCommand, bool>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<GetUserPermissionsQuery, System.Collections.Generic.List<string>>, RbacHandlers>();
             services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
             services.AddScoped<IQueryHandler<GetWorkstationByPcIdQuery, Workstation?>, GetWorkstationByPcIdQueryHandler>();
             services.AddScoped<ICommandHandler<AuthorizeWorkstationCommand, Workstation>, AuthorizeWorkstationCommandHandler>();

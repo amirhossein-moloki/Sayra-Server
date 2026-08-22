@@ -1,10 +1,16 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Reservations;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
+using Sayra.Backend.Domain;
 
 namespace Sayra.Backend.Api.Controllers
 {
@@ -18,6 +24,8 @@ namespace Sayra.Backend.Api.Controllers
         private readonly ICommandHandler<ActivateReservationCommand, ReservationResponseDto> _activateReservationHandler;
         private readonly IQueryHandler<GetReservationQuery, ReservationResponseDto> _getReservationHandler;
         private readonly IQueryHandler<ValidateReservationQuery, ReservationValidationResultDto> _validateReservationHandler;
+        private readonly IAuthorizationService _authorizationService;
+        private readonly IRepository<Reservation> _reservationRepository;
 
         public ReservationsController(
             ICommandHandler<CreateReservationCommand, ReservationResponseDto> createReservationHandler,
@@ -25,7 +33,9 @@ namespace Sayra.Backend.Api.Controllers
             ICommandHandler<CancelReservationCommand, ReservationResponseDto> cancelReservationHandler,
             ICommandHandler<ActivateReservationCommand, ReservationResponseDto> activateReservationHandler,
             IQueryHandler<GetReservationQuery, ReservationResponseDto> getReservationHandler,
-            IQueryHandler<ValidateReservationQuery, ReservationValidationResultDto> validateReservationHandler)
+            IQueryHandler<ValidateReservationQuery, ReservationValidationResultDto> validateReservationHandler,
+            IAuthorizationService authorizationService,
+            IRepository<Reservation> reservationRepository)
         {
             _createReservationHandler = createReservationHandler ?? throw new ArgumentNullException(nameof(createReservationHandler));
             _confirmReservationHandler = confirmReservationHandler ?? throw new ArgumentNullException(nameof(confirmReservationHandler));
@@ -33,14 +43,27 @@ namespace Sayra.Backend.Api.Controllers
             _activateReservationHandler = activateReservationHandler ?? throw new ArgumentNullException(nameof(activateReservationHandler));
             _getReservationHandler = getReservationHandler ?? throw new ArgumentNullException(nameof(getReservationHandler));
             _validateReservationHandler = validateReservationHandler ?? throw new ArgumentNullException(nameof(validateReservationHandler));
+            _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
+            _reservationRepository = reservationRepository ?? throw new ArgumentNullException(nameof(reservationRepository));
         }
 
         [HttpPost]
+        [HasPermission(PermissionCatalog.CreateReservation)]
         public async Task<IActionResult> CreateAsync([FromBody] CreateReservationRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
             {
                 return BadRequest(new { code = "INVALID_PAYLOAD", message = "Request body cannot be empty." });
+            }
+
+            var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+            if (principal != null && principal.Roles.All(r => string.Equals(r, RoleCatalog.Gamer, StringComparison.OrdinalIgnoreCase)))
+            {
+                Guid principalGamerId = principal.GamerId ?? principal.UserId ?? Guid.Empty;
+                if (principalGamerId != Guid.Empty && request.GamerId != principalGamerId)
+                {
+                    return StatusCode(403, new { code = "CROSS_GAMER_ACCESS_DENIED", message = "Cannot create reservations for another gamer." });
+                }
             }
 
             var command = new CreateReservationCommand
@@ -99,8 +122,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}")]
+        [HasPermission(PermissionCatalog.ViewReservations)]
         public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         {
+            var reservation = await _reservationRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (reservation != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.ViewReservations, reservation, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var query = new GetReservationQuery { ReservationId = id };
             var result = await _getReservationHandler.HandleAsync(query, cancellationToken);
 
@@ -113,6 +148,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/confirm")]
+        [HasPermission(PermissionCatalog.ManageReservations)]
         public async Task<IActionResult> ConfirmAsync(Guid id, CancellationToken cancellationToken)
         {
             var command = new ConfirmReservationCommand { ReservationId = id };
@@ -132,8 +168,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/cancel")]
+        [HasPermission(PermissionCatalog.CancelReservation)]
         public async Task<IActionResult> CancelAsync(Guid id, [FromBody] CancelReservationRequestDto? request, CancellationToken cancellationToken)
         {
+            var reservation = await _reservationRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (reservation != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.CancelReservation, reservation, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new CancelReservationCommand
             {
                 ReservationId = id,
@@ -156,6 +204,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/activate")]
+        [HasPermission(PermissionCatalog.ManageReservations)]
         public async Task<IActionResult> ActivateAsync(Guid id, CancellationToken cancellationToken)
         {
             var command = new ActivateReservationCommand { ReservationId = id };
@@ -173,10 +222,5 @@ namespace Sayra.Backend.Api.Controllers
 
             return Ok(result.Value!);
         }
-    }
-
-    public class CancelReservationRequestDto
-    {
-        public string? Reason { get; set; }
     }
 }

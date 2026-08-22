@@ -3,8 +3,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Financial;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
 
 namespace Sayra.Backend.Api.Controllers
@@ -25,6 +27,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost]
+        [HasPermission(PermissionCatalog.ProcessPayment)]
         public async Task<IActionResult> CreatePaymentAsync([FromBody] CreatePaymentRequestDto request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader, CancellationToken cancellationToken = default)
         {
             if (request == null)
@@ -69,6 +72,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}", Name = "GetPaymentById")]
+        [HasPermission(PermissionCatalog.ViewFinancialData)]
         public async Task<IActionResult> GetPaymentByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             var query = new GetPaymentQuery { PaymentId = id };

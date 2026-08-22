@@ -1,10 +1,16 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
+using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Sessions;
 using Sayra.Backend.Contracts;
+using Sayra.Backend.Domain;
 
 namespace Sayra.Backend.Api.Controllers
 {
@@ -23,6 +29,8 @@ namespace Sayra.Backend.Api.Controllers
         private readonly IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> _getTimingHandler;
         private readonly IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> _getActiveByWorkstationHandler;
         private readonly IQueryHandler<GetActiveSessionByGamerQuery, SessionResponseDto?> _getActiveByGamerHandler;
+        private readonly IAuthorizationService _authorizationService;
+        private readonly IRepository<Session> _sessionRepository;
 
         public SessionsController(
             ICommandHandler<StartSessionCommand, SessionResponseDto> startSessionHandler,
@@ -35,7 +43,9 @@ namespace Sayra.Backend.Api.Controllers
             IQueryHandler<GetSessionQuery, SessionResponseDto> getSessionHandler,
             IQueryHandler<GetSessionTimingQuery, SessionTimingResponseDto> getTimingHandler,
             IQueryHandler<GetActiveSessionByWorkstationQuery, SessionResponseDto?> getActiveByWorkstationHandler,
-            IQueryHandler<GetActiveSessionByGamerQuery, SessionResponseDto?> getActiveByGamerHandler)
+            IQueryHandler<GetActiveSessionByGamerQuery, SessionResponseDto?> getActiveByGamerHandler,
+            IAuthorizationService authorizationService,
+            IRepository<Session> sessionRepository)
         {
             _startSessionHandler = startSessionHandler ?? throw new ArgumentNullException(nameof(startSessionHandler));
             _pauseSessionHandler = pauseSessionHandler ?? throw new ArgumentNullException(nameof(pauseSessionHandler));
@@ -48,14 +58,27 @@ namespace Sayra.Backend.Api.Controllers
             _getTimingHandler = getTimingHandler ?? throw new ArgumentNullException(nameof(getTimingHandler));
             _getActiveByWorkstationHandler = getActiveByWorkstationHandler ?? throw new ArgumentNullException(nameof(getActiveByWorkstationHandler));
             _getActiveByGamerHandler = getActiveByGamerHandler ?? throw new ArgumentNullException(nameof(getActiveByGamerHandler));
+            _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
+            _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         }
 
         [HttpPost]
+        [HasPermission(PermissionCatalog.StartSession)]
         public async Task<IActionResult> StartAsync([FromBody] StartSessionRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
             {
                 return BadRequest(new { code = "INVALID_PAYLOAD", message = "Request body cannot be empty." });
+            }
+
+            var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+            if (principal != null && principal.Roles.All(r => string.Equals(r, RoleCatalog.Gamer, StringComparison.OrdinalIgnoreCase)))
+            {
+                Guid principalGamerId = principal.GamerId ?? principal.UserId ?? Guid.Empty;
+                if (principalGamerId != Guid.Empty && request.GamerId != principalGamerId)
+                {
+                    return StatusCode(403, new { code = "CROSS_GAMER_ACCESS_DENIED", message = "Cannot start session for another gamer." });
+                }
             }
 
             var command = new StartSessionCommand(request.GamerId, request.WorkstationId, request.ReservationId);
@@ -76,8 +99,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}")]
+        [HasPermission(PermissionCatalog.ViewSessions)]
         public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.ViewSessions, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var query = new GetSessionQuery(id);
             var result = await _getSessionHandler.HandleAsync(query, cancellationToken);
 
@@ -90,11 +125,23 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/extend")]
+        [HasPermission(PermissionCatalog.ExtendSession)]
         public async Task<IActionResult> ExtendAsync(Guid id, [FromBody] ExtendSessionRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
             {
                 return BadRequest(new { code = "INVALID_PAYLOAD", message = "Request body cannot be empty." });
+            }
+
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.ExtendSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
             }
 
             string? idempotencyKey = request.IdempotencyKey;
@@ -120,8 +167,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{id:guid}/timing")]
+        [HasPermission(PermissionCatalog.ViewSessions)]
         public async Task<IActionResult> GetTimingAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.ViewSessions, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var query = new GetSessionTimingQuery(id);
             var result = await _getTimingHandler.HandleAsync(query, cancellationToken);
 
@@ -134,8 +193,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/pause")]
+        [HasPermission(PermissionCatalog.PauseSession)]
         public async Task<IActionResult> PauseAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.PauseSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new PauseSessionCommand(id);
             var result = await _pauseSessionHandler.HandleAsync(command, cancellationToken);
 
@@ -153,8 +224,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/resume")]
+        [HasPermission(PermissionCatalog.ResumeSession)]
         public async Task<IActionResult> ResumeAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.ResumeSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new ResumeSessionCommand(id);
             var result = await _resumeSessionHandler.HandleAsync(command, cancellationToken);
 
@@ -172,8 +255,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/stop")]
+        [HasPermission(PermissionCatalog.StopSession)]
         public async Task<IActionResult> StopAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.StopSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new StopSessionCommand(id);
             var result = await _stopSessionHandler.HandleAsync(command, cancellationToken);
 
@@ -191,8 +286,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/cancel")]
+        [HasPermission(PermissionCatalog.StopSession)]
         public async Task<IActionResult> CancelAsync(Guid id, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.StopSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new CancelSessionCommand(id);
             var result = await _cancelSessionHandler.HandleAsync(command, cancellationToken);
 
@@ -210,8 +317,20 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{id:guid}/terminate")]
+        [HasPermission(PermissionCatalog.StopSession)]
         public async Task<IActionResult> TerminateAsync(Guid id, [FromBody] TerminateSessionRequestDto? request, CancellationToken cancellationToken)
         {
+            var session = await _sessionRepository.GetByIdAsync(id, track: false, cancellationToken: cancellationToken);
+            if (session != null)
+            {
+                var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
+                var authResult = await _authorizationService.AuthorizeAsync(principal, PermissionCatalog.StopSession, session, cancellationToken);
+                if (!authResult.IsAllowed)
+                {
+                    return StatusCode(403, new { code = authResult.ErrorCode ?? "FORBIDDEN", message = authResult.FailureReason });
+                }
+            }
+
             var command = new TerminateSessionCommand(id, request?.Reason);
             var result = await _terminateSessionHandler.HandleAsync(command, cancellationToken);
 
@@ -229,6 +348,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("workstation/{workstationId:guid}/active")]
+        [HasPermission(PermissionCatalog.ViewSessions)]
         public async Task<IActionResult> GetActiveByWorkstationAsync(Guid workstationId, CancellationToken cancellationToken)
         {
             var query = new GetActiveSessionByWorkstationQuery(workstationId);
@@ -248,6 +368,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("gamer/{gamerId:guid}/active")]
+        [HasPermission(PermissionCatalog.ViewSessions)]
         public async Task<IActionResult> GetActiveByGamerAsync(Guid gamerId, CancellationToken cancellationToken)
         {
             var query = new GetActiveSessionByGamerQuery(gamerId);
