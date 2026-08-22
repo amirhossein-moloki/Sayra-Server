@@ -1,0 +1,3 @@
+## 2026-08-22 - Zero-Allocation Static Cryptographic Methods for TCP Framing
+**Learning:** In high-throughput TCP streaming architectures, stream-wrapping allocations (`MemoryStream`, `CryptoStream`, and `new HMACSHA256(...)` object instantiations) on every frame generate significant GC pressure. Using .NET 8 static crypto APIs (`HMACSHA256.HashData`, `aes.EncryptCbc`, `aes.DecryptCbc`, `CryptographicOperations.FixedTimeEquals`) eliminates disposable allocations on per-packet message paths.
+**Action:** Always favor static `HashData` and span/array-based cipher methods in .NET 8 over stream-wrapping classes for high-frequency network/protocol paths.
