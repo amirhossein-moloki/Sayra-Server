@@ -13,23 +13,12 @@ namespace Sayra.Backend.Infrastructure.Security
             if (key == null || key.Length != 32) throw new ArgumentException("Key must be 256 bits (32 bytes).", nameof(key));
             if (iv == null || iv.Length != 16) throw new ArgumentException("IV must be 128 bits (16 bytes).", nameof(iv));
 
+            // Performance: Use .NET 8 aes.EncryptCbc to perform direct zero-stream-allocation CBC encryption,
+            // eliminating MemoryStream and CryptoStream object overhead on high-frequency TCP stream traffic.
             using (var aes = Aes.Create())
             {
                 aes.Key = key;
-                aes.IV = iv;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-
-                using (var encryptor = aes.CreateEncryptor(aes.Key, aes.IV))
-                using (var ms = new MemoryStream())
-                {
-                    using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-                    {
-                        cs.Write(plainText, 0, plainText.Length);
-                        cs.FlushFinalBlock();
-                    }
-                    return ms.ToArray();
-                }
+                return aes.EncryptCbc(plainText, iv, PaddingMode.PKCS7);
             }
         }
 
@@ -39,23 +28,12 @@ namespace Sayra.Backend.Infrastructure.Security
             if (key == null || key.Length != 32) throw new ArgumentException("Key must be 256 bits (32 bytes).", nameof(key));
             if (iv == null || iv.Length != 16) throw new ArgumentException("IV must be 128 bits (16 bytes).", nameof(iv));
 
+            // Performance: Use .NET 8 aes.DecryptCbc to perform direct zero-stream-allocation CBC decryption,
+            // avoiding intermediate stream buffers and GC pressure for every incoming message frame.
             using (var aes = Aes.Create())
             {
                 aes.Key = key;
-                aes.IV = iv;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-
-                using (var decryptor = aes.CreateDecryptor(aes.Key, aes.IV))
-                using (var ms = new MemoryStream())
-                {
-                    using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Write))
-                    {
-                        cs.Write(cipherText, 0, cipherText.Length);
-                        cs.FlushFinalBlock();
-                    }
-                    return ms.ToArray();
-                }
+                return aes.DecryptCbc(cipherText, iv, PaddingMode.PKCS7);
             }
         }
 
@@ -64,10 +42,9 @@ namespace Sayra.Backend.Infrastructure.Security
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (key == null) throw new ArgumentNullException(nameof(key));
 
-            using (var hmac = new HMACSHA256(key))
-            {
-                return hmac.ComputeHash(data);
-            }
+            // Performance: Use .NET 8 static HMACSHA256.HashData to compute HMAC-SHA256 directly without
+            // instantiating or disposing disposable HMACSHA256 object instances.
+            return HMACSHA256.HashData(key, data);
         }
 
         public bool VerifyHmacSha256(byte[] data, byte[] key, byte[] hash)
@@ -107,13 +84,9 @@ namespace Sayra.Backend.Infrastructure.Security
 
         private static bool CryptographicEquals(byte[] a, byte[] b)
         {
-            if (a.Length != b.Length) return false;
-            int result = 0;
-            for (int i = 0; i < a.Length; i++)
-            {
-                result |= a[i] ^ b[i];
-            }
-            return result == 0;
+            if (a == null || b == null) return a == b;
+            // Performance: Use SIMD-optimized CryptographicOperations.FixedTimeEquals for constant-time comparison
+            return CryptographicOperations.FixedTimeEquals(a, b);
         }
     }
 }
