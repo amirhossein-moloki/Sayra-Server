@@ -232,6 +232,27 @@ namespace Sayra.Backend.Infrastructure.Security
             // Clean up tracking on successful login to prevent memory leak
             CleanupSession(connection.ConnectionId);
 
+            using (var scope = _serviceScopeFactory.CreateScope())
+            {
+                var secService = scope.ServiceProvider.GetService<ISecurityEventService>();
+                if (secService != null)
+                {
+                    await secService.RecordSecurityEventAsync(
+                        eventType: "DEVICE_REGISTERED",
+                        actorId: null,
+                        actorType: "DEVICE",
+                        deviceId: response.PcId,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "Workstation",
+                        resourceId: null,
+                        action: "REGISTER",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+                }
+            }
+
             _logger.LogInformation("Handshake completed successfully. Transitioned connection {ConnectionId} to Authenticated.", connection.ConnectionId);
 
             return new AuthenticationResult
@@ -253,6 +274,42 @@ namespace Sayra.Backend.Infrastructure.Security
             _failedAttempts.AddOrUpdate(connection.ConnectionId, 1, (_, count) => count + 1);
 
             _logger.LogWarning("Security Event: Authentication failed for connection {ConnectionId}. Reason: {Reason}", connection.ConnectionId, message);
+
+            try
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var secService = scope.ServiceProvider.GetService<ISecurityEventService>();
+                        if (secService != null)
+                        {
+                            await secService.RecordSecurityEventAsync(
+                                eventType: "DEVICE_AUTHENTICATION_FAILED",
+                                actorId: null,
+                                actorType: "DEVICE",
+                                deviceId: connection.PcId ?? "UNKNOWN",
+                                organizationId: null,
+                                siteId: null,
+                                resourceType: "Workstation",
+                                resourceId: null,
+                                action: "HANDSHAKE",
+                                result: "FAILED",
+                                failureReason: message,
+                                cancellationToken: CancellationToken.None);
+                        }
+                    }
+                    catch
+                    {
+                        // Non-blocking background event recording
+                    }
+                });
+            }
+            catch
+            {
+                // Non-blocking security event recording
+            }
 
             // Clean up transient session details on validation failure to prevent memory leak
             _sessions.TryRemove(connection.ConnectionId, out _);
