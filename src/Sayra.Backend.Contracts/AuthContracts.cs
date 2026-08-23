@@ -47,4 +47,17 @@ namespace Sayra.Backend.Contracts
         public string? Message { get; set; }
         public string? ErrorCode { get; set; }
     }
+
+    public class LogoutRequestDto
+    {
+        public string? SessionId { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    public class LogoutResponseDto
+    {
+        public bool IsSuccess { get; set; }
+        public string? Message { get; set; }
+        public string? ErrorCode { get; set; }
+    }
 }

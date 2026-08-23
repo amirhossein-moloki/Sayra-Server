@@ -68,7 +68,29 @@ namespace Sayra.Backend.Api.Middleware
                 token = authHeader.Substring("Bearer ".Length).Trim();
             }
 
-            string? lookupIdStr = !string.IsNullOrWhiteSpace(token) ? token : (!string.IsNullOrWhiteSpace(xUserId) ? xUserId : xGamerId);
+            var sessionService = context.RequestServices.GetService<IAuthenticationSessionService>();
+            AuthenticationSession? authSession = null;
+
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                if (sessionService != null)
+                {
+                    bool isValid = await sessionService.ValidateSessionAsync(token, context.RequestAborted);
+                    if (isValid)
+                    {
+                        authSession = await sessionService.GetSessionByTokenAsync(token, context.RequestAborted);
+                    }
+                    else
+                    {
+                        // Explicit Bearer token provided but invalid/expired/revoked -> Fail closed immediately
+                        return UserPrincipal.Anonymous;
+                    }
+                }
+            }
+
+            string? lookupIdStr = authSession != null
+                ? (authSession.UserId?.ToString() ?? authSession.GamerId?.ToString())
+                : (!string.IsNullOrWhiteSpace(token) ? token : (!string.IsNullOrWhiteSpace(xUserId) ? xUserId : xGamerId));
 
             // Require an explicit user/gamer/token identifier to authenticate. Client-supplied role alone is unauthenticated.
             if (string.IsNullOrWhiteSpace(lookupIdStr))
@@ -102,6 +124,17 @@ namespace Sayra.Backend.Api.Middleware
 
             // If neither User nor Gamer entity exists in database for this identifier, reject as unauthenticated
             if (user == null && gamer == null)
+            {
+                return UserPrincipal.Anonymous;
+            }
+
+            // Check account status state
+            if (user != null && (user.Status == UserAccountState.Disabled || user.Status == UserAccountState.Suspended))
+            {
+                return UserPrincipal.Anonymous;
+            }
+
+            if (gamer != null && !gamer.CanOperate())
             {
                 return UserPrincipal.Anonymous;
             }
@@ -154,6 +187,7 @@ namespace Sayra.Backend.Api.Middleware
             if (Guid.TryParse(xSiteId, out Guid siteGuid)) principal.SiteId = siteGuid;
             if (Guid.TryParse(xOrgId, out Guid orgGuid)) principal.OrganizationId = orgGuid;
             if (!string.IsNullOrWhiteSpace(xPcId)) principal.PcId = xPcId.Trim();
+            if (authSession != null && !string.IsNullOrWhiteSpace(authSession.PcId)) principal.PcId = authSession.PcId.Trim();
 
             return principal;
         }
