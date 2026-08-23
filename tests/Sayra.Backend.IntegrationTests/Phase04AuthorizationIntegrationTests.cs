@@ -206,5 +206,85 @@ namespace Sayra.Backend.IntegrationTests
             db.Roles.Add(role2);
             await Assert.ThrowsAsync<DbUpdateException>(async () => await db.SaveChangesAsync());
         }
+
+        [Fact]
+        public async Task Full_RBAC_Lifecycle_Roles_Permissions_And_Immediate_Revocation()
+        {
+            string suffix = Guid.NewGuid().ToString("N")[..8];
+
+            // 1. Ensure Permission exists in database
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                if (!await db.Permissions.AnyAsync(p => p.Code == "ManageUsers"))
+                {
+                    db.Permissions.Add(new Permission { Code = "ManageUsers", Name = "Manage Users", Category = "Admin", Status = "Active" });
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            // 2. Admin creates a custom role and permission assignment
+            var createRoleResp = await _adminClient.PostAsJsonAsync("/api/roles", new
+            {
+                code = $"ROLE_CUSTOM_{suffix}",
+                name = $"Custom Role {suffix}",
+                description = "Custom test role"
+            });
+            Assert.Equal(HttpStatusCode.Created, createRoleResp.StatusCode);
+            var roleDto = await createRoleResp.Content.ReadFromJsonAsync<RoleResponseDto>();
+            Assert.NotNull(roleDto);
+
+            // 3. Assign permission to custom role
+            var assignPermResp = await _adminClient.PostAsJsonAsync($"/api/roles/{roleDto.Code}/permissions", new
+            {
+                permissionCode = "ManageUsers"
+            });
+            Assert.Equal(HttpStatusCode.OK, assignPermResp.StatusCode);
+
+            // 3. Create a test user in DB
+            Guid testUserId = Guid.NewGuid();
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var user = new User
+                {
+                    UserId = $"USR_RBAC_{suffix}",
+                    Username = $"rbac_usr_{suffix}",
+                    Role = UserRole.Operator,
+                    Status = UserAccountState.Active
+                };
+                typeof(BaseEntity).GetProperty("Id")?.SetValue(user, testUserId);
+                db.Users.Add(user);
+                await db.SaveChangesAsync();
+            }
+
+            // 4. Assign custom role to test user
+            var assignRoleResp = await _adminClient.PostAsJsonAsync($"/api/users/{testUserId}/roles", new
+            {
+                roleCode = roleDto.Code
+            });
+            Assert.Equal(HttpStatusCode.OK, assignRoleResp.StatusCode);
+
+            // Duplicate role assignment should return 409 Conflict
+            var dupAssignResp = await _adminClient.PostAsJsonAsync($"/api/users/{testUserId}/roles", new
+            {
+                roleCode = roleDto.Code
+            });
+            Assert.Equal(HttpStatusCode.Conflict, dupAssignResp.StatusCode);
+
+            // 5. User accesses protected endpoint -> Success
+            var userClient = _factory.CreateClient();
+            userClient.DefaultRequestHeaders.Add("X-User-Id", testUserId.ToString());
+
+            var getRolesResp = await userClient.GetAsync("/api/roles");
+            Assert.Equal(HttpStatusCode.OK, getRolesResp.StatusCode);
+
+            // 6. Disable the role -> subsequent call to protected endpoint immediately returns 403 Forbidden
+            var disableRoleResp = await _adminClient.PostAsJsonAsync($"/api/roles/{roleDto.Code}/disable", new { });
+            Assert.Equal(HttpStatusCode.OK, disableRoleResp.StatusCode);
+
+            var getRolesDisabledResp = await userClient.GetAsync("/api/roles");
+            Assert.Equal(HttpStatusCode.Forbidden, getRolesDisabledResp.StatusCode);
+        }
     }
 }

@@ -207,5 +207,121 @@ namespace Sayra.Backend.UnitTests
             Assert.False(result.IsAllowed);
             Assert.Equal("PERMISSION_DENIED", result.ErrorCode);
         }
+
+        [Fact]
+        public void Role_And_Permission_Status_And_Disable_Enable_Methods_Work_Correctly()
+        {
+            var role = new Role { Code = "TEST_ROLE", Name = "Test Role" };
+            Assert.True(role.IsActive);
+            Assert.Equal("Active", role.Status);
+
+            role.Disable();
+            Assert.False(role.IsActive);
+            Assert.Equal("Disabled", role.Status);
+            Assert.NotNull(role.UpdatedAt);
+
+            role.Enable();
+            Assert.True(role.IsActive);
+            Assert.Equal("Active", role.Status);
+
+            var perm = new Permission { Code = "TEST_PERM", Name = "Test Perm" };
+            Assert.True(perm.IsActive);
+            Assert.Equal("Active", perm.Status);
+
+            perm.Disable();
+            Assert.False(perm.IsActive);
+            Assert.Equal("Disabled", perm.Status);
+            Assert.NotNull(perm.UpdatedAt);
+
+            perm.Enable();
+            Assert.True(perm.IsActive);
+            Assert.Equal("Active", perm.Status);
+        }
+
+        [Fact]
+        public async Task CQRS_RbacHandlers_Prevents_Duplicate_Role_And_Permission_Assignment()
+        {
+            var userRepoMock = new Mock<IRepository<User>>();
+            var roleRepoMock = new Mock<IRepository<Role>>();
+            var permRepoMock = new Mock<IRepository<Permission>>();
+            var userRoleRepoMock = new Mock<IRepository<UserRoleEntity>>();
+            var rolePermRepoMock = new Mock<IRepository<RolePermission>>();
+            var auditRepoMock = new Mock<IRepository<AuditEvent>>();
+            var authServiceMock = new Mock<IAuthorizationService>();
+            var uowMock = new Mock<IUnitOfWork>();
+
+            authServiceMock.Setup(a => a.AuthorizeAsync(It.IsAny<UserPrincipal>(), It.IsAny<string>(), It.IsAny<object>(), default))
+                .ReturnsAsync(AuthorizationResult.Allowed());
+
+            Guid userId = Guid.NewGuid();
+            var user = new User { Username = "testuser" };
+            userRepoMock.Setup(r => r.GetByIdAsync(userId, true, default)).ReturnsAsync(user);
+
+            var activeRole = new Role { Code = "OPERATOR", Name = "Operator", Status = "Active" };
+            roleRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Role, bool>>>(), false, default))
+                .ReturnsAsync(activeRole);
+
+            // User already has this role assigned
+            userRoleRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<UserRoleEntity, bool>>>(), false, default))
+                .ReturnsAsync(new UserRoleEntity { UserEntityId = userId, RoleId = activeRole.Id });
+
+            var handlers = new RbacHandlers(
+                userRepoMock.Object,
+                roleRepoMock.Object,
+                permRepoMock.Object,
+                userRoleRepoMock.Object,
+                rolePermRepoMock.Object,
+                auditRepoMock.Object,
+                authServiceMock.Object,
+                uowMock.Object
+            );
+
+            var cmd = new AssignRoleToUserCommand { UserEntityId = userId, RoleCode = "OPERATOR" };
+            var result = await handlers.HandleAsync(cmd, default);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal("ROLE_ALREADY_ASSIGNED", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task CQRS_RbacHandlers_Disables_Assignment_For_Disabled_Role_Or_Permission()
+        {
+            var userRepoMock = new Mock<IRepository<User>>();
+            var roleRepoMock = new Mock<IRepository<Role>>();
+            var permRepoMock = new Mock<IRepository<Permission>>();
+            var userRoleRepoMock = new Mock<IRepository<UserRoleEntity>>();
+            var rolePermRepoMock = new Mock<IRepository<RolePermission>>();
+            var auditRepoMock = new Mock<IRepository<AuditEvent>>();
+            var authServiceMock = new Mock<IAuthorizationService>();
+            var uowMock = new Mock<IUnitOfWork>();
+
+            authServiceMock.Setup(a => a.AuthorizeAsync(It.IsAny<UserPrincipal>(), It.IsAny<string>(), It.IsAny<object>(), default))
+                .ReturnsAsync(AuthorizationResult.Allowed());
+
+            Guid userId = Guid.NewGuid();
+            var user = new User { Username = "testuser" };
+            userRepoMock.Setup(r => r.GetByIdAsync(userId, true, default)).ReturnsAsync(user);
+
+            var disabledRole = new Role { Code = "DISABLED_ROLE", Name = "Disabled Role", Status = "Disabled" };
+            roleRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Role, bool>>>(), false, default))
+                .ReturnsAsync(disabledRole);
+
+            var handlers = new RbacHandlers(
+                userRepoMock.Object,
+                roleRepoMock.Object,
+                permRepoMock.Object,
+                userRoleRepoMock.Object,
+                rolePermRepoMock.Object,
+                auditRepoMock.Object,
+                authServiceMock.Object,
+                uowMock.Object
+            );
+
+            var cmd = new AssignRoleToUserCommand { UserEntityId = userId, RoleCode = "DISABLED_ROLE" };
+            var result = await handlers.HandleAsync(cmd, default);
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal("INVALID_ROLE_STATE", result.ErrorCode);
+        }
     }
 }

@@ -60,4 +60,43 @@ namespace Sayra.Backend.Contracts
         public string? Message { get; set; }
         public string? ErrorCode { get; set; }
     }
+
+    public class CreateRoleRequestDto
+    {
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+    }
+
+    public class RoleResponseDto
+    {
+        public Guid Id { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public bool IsSystemRole { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class AssignRoleRequestDto
+    {
+        public string RoleCode { get; set; } = string.Empty;
+    }
+
+    public class PermissionResponseDto
+    {
+        public Guid Id { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Category { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class AssignPermissionRequestDto
+    {
+        public string PermissionCode { get; set; } = string.Empty;
+    }
 }
