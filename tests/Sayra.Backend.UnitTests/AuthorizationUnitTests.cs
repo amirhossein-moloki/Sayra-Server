@@ -107,6 +107,92 @@ namespace Sayra.Backend.UnitTests
         }
 
         [Fact]
+        public async Task User_With_Resource_Access_Grant_But_Without_Permission_Is_Denied()
+        {
+            Guid userId = Guid.NewGuid();
+            Guid workstationId = Guid.NewGuid();
+
+            var userAccessRepoMock = new Mock<IRepository<UserResourceAccess>>();
+            userAccessRepoMock.Setup(r => r.FindAsync(
+                It.IsAny<System.Linq.Expressions.Expression<Func<UserResourceAccess, bool>>>(),
+                false,
+                default))
+                .ReturnsAsync(new List<UserResourceAccess>
+                {
+                    new UserResourceAccess
+                    {
+                        UserEntityId = userId,
+                        ResourceType = "Workstation",
+                        ResourceId = workstationId,
+                        IsGranted = true,
+                        Status = "Active"
+                    }
+                });
+
+            var authService = new AuthorizationService(_auditRepositoryMock.Object, userAccessRepoMock.Object, null);
+
+            var principalLackingPerm = new UserPrincipal
+            {
+                IsAuthenticated = true,
+                UserId = userId,
+                Roles = new List<string> { RoleCatalog.Operator },
+                Permissions = new List<string> { PermissionCatalog.ViewWorkstations }, // Lacks ControlWorkstations
+                AccountStatus = UserAccountState.Active
+            };
+
+            var ws = new Workstation { PcId = "PC-101" };
+            typeof(BaseEntity).GetProperty(nameof(BaseEntity.Id))!.SetValue(ws, workstationId);
+
+            var result = await authService.AuthorizeAsync(principalLackingPerm, PermissionCatalog.ControlWorkstations, ws);
+
+            Assert.False(result.IsAllowed);
+            Assert.Equal("PERMISSION_DENIED", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task Explicit_UserResourceAccess_Restriction_Is_Enforced()
+        {
+            Guid userId = Guid.NewGuid();
+            Guid workstationId = Guid.NewGuid();
+
+            var userAccessRepoMock = new Mock<IRepository<UserResourceAccess>>();
+            userAccessRepoMock.Setup(r => r.FindAsync(
+                It.IsAny<System.Linq.Expressions.Expression<Func<UserResourceAccess, bool>>>(),
+                false,
+                default))
+                .ReturnsAsync(new List<UserResourceAccess>
+                {
+                    new UserResourceAccess
+                    {
+                        UserEntityId = userId,
+                        ResourceType = "Workstation",
+                        ResourceId = workstationId,
+                        IsGranted = false,
+                        Status = "Active"
+                    }
+                });
+
+            var authServiceWithExplicitAccess = new AuthorizationService(_auditRepositoryMock.Object, userAccessRepoMock.Object, null);
+
+            var principal = new UserPrincipal
+            {
+                IsAuthenticated = true,
+                UserId = userId,
+                Roles = new List<string> { RoleCatalog.Operator },
+                Permissions = new List<string> { PermissionCatalog.ControlWorkstations },
+                AccountStatus = UserAccountState.Active
+            };
+
+            var ws = new Workstation { PcId = "PC-100" };
+            typeof(BaseEntity).GetProperty(nameof(BaseEntity.Id))!.SetValue(ws, workstationId);
+
+            var result = await authServiceWithExplicitAccess.AuthorizeAsync(principal, PermissionCatalog.ControlWorkstations, ws);
+
+            Assert.False(result.IsAllowed);
+            Assert.Equal("EXPLICIT_RESTRICTION_DENIED", result.ErrorCode);
+        }
+
+        [Fact]
         public async Task Gamer_Accessing_Own_Reservation_Is_Allowed()
         {
             Guid gamerId = Guid.NewGuid();
