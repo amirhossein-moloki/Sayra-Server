@@ -151,22 +151,26 @@ namespace Sayra.Backend.Api.Middleware
                 SiteId = gamer?.SiteEntityId ?? user?.SiteEntityId
             };
 
-            // Resolve roles and permissions from database
+            // Resolve roles and permissions from database (filtering out disabled roles and permissions)
             if (user != null && userRoleRepository != null && roleRepository != null && rolePermRepository != null && permRepository != null)
             {
                 var uRoles = await userRoleRepository.FindAsync(ur => ur.UserEntityId == user.Id, track: false);
                 var rIds = uRoles.Select(ur => ur.RoleId).ToList();
                 if (rIds.Any())
                 {
-                    var roles = await roleRepository.FindAsync(r => rIds.Contains(r.Id), track: false);
-                    principal.Roles.AddRange(roles.Select(r => r.Code));
+                    var activeRoles = await roleRepository.FindAsync(r => rIds.Contains(r.Id) && r.Status.ToLower() == "active", track: false);
+                    principal.Roles.AddRange(activeRoles.Select(r => r.Code));
 
-                    var rPerms = await rolePermRepository.FindAsync(rp => rIds.Contains(rp.RoleId), track: false);
-                    var pIds = rPerms.Select(rp => rp.PermissionId).Distinct().ToList();
-                    if (pIds.Any())
+                    var activeRoleIds = activeRoles.Select(r => r.Id).ToList();
+                    if (activeRoleIds.Any())
                     {
-                        var perms = await permRepository.FindAsync(p => pIds.Contains(p.Id), track: false);
-                        principal.Permissions.AddRange(perms.Select(p => p.Code));
+                        var rPerms = await rolePermRepository.FindAsync(rp => activeRoleIds.Contains(rp.RoleId), track: false);
+                        var pIds = rPerms.Select(rp => rp.PermissionId).Distinct().ToList();
+                        if (pIds.Any())
+                        {
+                            var activePerms = await permRepository.FindAsync(p => pIds.Contains(p.Id) && p.Status.ToLower() == "active", track: false);
+                            principal.Permissions.AddRange(activePerms.Select(p => p.Code));
+                        }
                     }
                 }
             }

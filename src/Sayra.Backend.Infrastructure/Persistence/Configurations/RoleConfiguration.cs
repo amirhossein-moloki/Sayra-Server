@@ -23,6 +23,11 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(r => r.Description)
                 .HasMaxLength(256);
 
+            builder.Property(r => r.Status)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("Active");
+
             builder.Property(r => r.IsSystemRole)
                 .IsRequired();
 

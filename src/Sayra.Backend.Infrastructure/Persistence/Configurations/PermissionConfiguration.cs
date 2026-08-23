@@ -27,6 +27,11 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(p => p.Description)
                 .HasMaxLength(256);
 
+            builder.Property(p => p.Status)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("Active");
+
             builder.HasIndex(p => p.Code)
                 .IsUnique()
                 .HasDatabaseName("IX_Permissions_Code");

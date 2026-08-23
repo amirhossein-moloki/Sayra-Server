@@ -101,11 +101,19 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IAuthorizationService, AuthorizationService>();
 
             // 5. Command & Query Handlers
+            services.AddScoped<ICommandHandler<CreateRoleCommand, Domain.Entities.Role>, RbacHandlers>();
             services.AddScoped<ICommandHandler<AssignRoleToUserCommand, bool>, RbacHandlers>();
             services.AddScoped<ICommandHandler<RemoveRoleFromUserCommand, bool>, RbacHandlers>();
             services.AddScoped<ICommandHandler<AssignPermissionToRoleCommand, bool>, RbacHandlers>();
             services.AddScoped<ICommandHandler<RemovePermissionFromRoleCommand, bool>, RbacHandlers>();
+            services.AddScoped<ICommandHandler<DisableRoleCommand, bool>, RbacHandlers>();
+            services.AddScoped<ICommandHandler<DisablePermissionCommand, bool>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<GetRolesQuery, System.Collections.Generic.List<Domain.Entities.Role>>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<GetUserRolesQuery, System.Collections.Generic.List<Domain.Entities.Role>>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<GetRolePermissionsQuery, System.Collections.Generic.List<Domain.Entities.Permission>>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<GetPermissionsQuery, System.Collections.Generic.List<Domain.Entities.Permission>>, RbacHandlers>();
             services.AddScoped<IQueryHandler<GetUserPermissionsQuery, System.Collections.Generic.List<string>>, RbacHandlers>();
+            services.AddScoped<IQueryHandler<CheckPermissionQuery, bool>, RbacHandlers>();
             services.AddScoped<ICommandHandler<RegisterWorkstationCommand, Workstation>, RegisterWorkstationCommandHandler>();
             services.AddScoped<IQueryHandler<GetWorkstationByPcIdQuery, Workstation?>, GetWorkstationByPcIdQueryHandler>();
             services.AddScoped<ICommandHandler<AuthorizeWorkstationCommand, Workstation>, AuthorizeWorkstationCommandHandler>();
