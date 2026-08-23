@@ -14,10 +14,17 @@ namespace Sayra.Backend.Application.Security
     public class AuthorizationService : IAuthorizationService
     {
         private readonly IRepository<AuditEvent> _auditEventRepository;
+        private readonly IRepository<UserResourceAccess>? _userResourceAccessRepository;
+        private readonly IRepository<UserRoleEntity>? _userRoleRepository;
 
-        public AuthorizationService(IRepository<AuditEvent> auditEventRepository)
+        public AuthorizationService(
+            IRepository<AuditEvent> auditEventRepository,
+            IRepository<UserResourceAccess>? userResourceAccessRepository = null,
+            IRepository<UserRoleEntity>? userRoleRepository = null)
         {
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
+            _userResourceAccessRepository = userResourceAccessRepository;
+            _userRoleRepository = userRoleRepository;
         }
 
         public async Task<AuthorizationResult> AuthorizeAsync(
@@ -54,7 +61,50 @@ namespace Sayra.Backend.Application.Security
                 }
             }
 
-            // 4. Resource Scope & Ownership Checks
+            // 4. Explicit UserResourceAccess Policies Check (User-specific or Role-specific)
+            if (_userResourceAccessRepository != null && resource != null)
+            {
+                var resourceType = GetResourceType(resource);
+                var resourceId = GetResourceId(resource);
+
+                if (!string.IsNullOrEmpty(resourceType) && resourceId.HasValue)
+                {
+                    List<Guid> relevantRoleIds = new List<Guid>();
+                    if (_userRoleRepository != null && principal.UserId.HasValue)
+                    {
+                        var userRoleEntities = await _userRoleRepository.FindAsync(
+                            ur => ur.UserEntityId == principal.UserId.Value,
+                            track: false,
+                            cancellationToken: cancellationToken);
+                        relevantRoleIds = userRoleEntities.Select(ur => ur.RoleId).ToList();
+                    }
+
+                    var activeAccessRules = await _userResourceAccessRepository.FindAsync(
+                        ura => ura.Status == "Active" &&
+                               ura.ResourceType == resourceType &&
+                               (ura.ResourceId == null || ura.ResourceId == resourceId.Value) &&
+                               ((principal.UserId.HasValue && ura.UserEntityId == principal.UserId.Value) ||
+                                (ura.RoleId.HasValue && relevantRoleIds.Contains(ura.RoleId.Value))),
+                        track: false,
+                        cancellationToken: cancellationToken);
+
+                    // Explicit Deny takes precedence
+                    if (activeAccessRules.Any(ura => !ura.IsGranted))
+                    {
+                        await RecordAuditEventAsync("RESOURCE_ACCESS_DENIED", principal, permission, "Explicit resource restriction in place.", cancellationToken);
+                        return AuthorizationResult.Denied("Access to this resource has been explicitly restricted.", "EXPLICIT_RESTRICTION_DENIED");
+                    }
+
+                    // Explicit Grant allows overriding organizational/site boundary
+                    if (activeAccessRules.Any(ura => ura.IsGranted))
+                    {
+                        await RecordAuditEventAsync("RESOURCE_ACCESS_GRANTED", principal, permission, "Explicit resource access granted.", cancellationToken);
+                        return AuthorizationResult.Allowed();
+                    }
+                }
+            }
+
+            // 5. Resource Scope & Ownership Checks
             if (resource != null)
             {
                 // Gamer Ownership Enforcement
@@ -102,7 +152,7 @@ namespace Sayra.Backend.Application.Security
                 }
             }
 
-            await RecordAuditEventAsync("AUTHORIZATION_GRANTED", principal, permission, "Access granted.", cancellationToken);
+            await RecordAuditEventAsync("RESOURCE_ACCESS_GRANTED", principal, permission, "Access granted.", cancellationToken);
             return AuthorizationResult.Allowed();
         }
 
@@ -182,6 +232,30 @@ namespace Sayra.Backend.Application.Security
             }
 
             return AuthorizationResult.Allowed();
+        }
+
+        private string? GetResourceType(object resource)
+        {
+            return resource switch
+            {
+                Organization => "Organization",
+                Site => "Site",
+                Zone => "Zone",
+                Workstation => "Workstation",
+                Session => "Session",
+                Reservation => "Reservation",
+                GamerAccount or FinancialTransaction or Payment => "FinancialData",
+                _ => resource.GetType().Name
+            };
+        }
+
+        private Guid? GetResourceId(object resource)
+        {
+            return resource switch
+            {
+                BaseEntity baseEntity => baseEntity.Id,
+                _ => null
+            };
         }
 
         private Guid? GetSiteIdFromResource(object resource)
