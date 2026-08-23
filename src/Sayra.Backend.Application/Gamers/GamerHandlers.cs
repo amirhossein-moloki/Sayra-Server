@@ -369,6 +369,7 @@ namespace Sayra.Backend.Application.Gamers
         private readonly IRepository<UserCredential> _userCredentialRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly ISecurityEventService? _securityEventService;
         private readonly IUnitOfWork _unitOfWork;
 
         public ChangeGamerPasswordCommandHandler(
@@ -377,7 +378,8 @@ namespace Sayra.Backend.Application.Gamers
             IRepository<UserCredential> userCredentialRepository,
             IRepository<AuditEvent> auditEventRepository,
             IPasswordHasher passwordHasher,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            ISecurityEventService? securityEventService = null)
         {
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
             _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
@@ -385,6 +387,7 @@ namespace Sayra.Backend.Application.Gamers
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _securityEventService = securityEventService;
         }
 
         public async Task<Result<bool>> HandleAsync(ChangeGamerPasswordCommand command, CancellationToken cancellationToken = default)
@@ -449,6 +452,23 @@ namespace Sayra.Backend.Application.Gamers
                 };
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
 
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "PASSWORD_CHANGED",
+                        actorId: command.GamerEntityId,
+                        actorType: "Gamer",
+                        deviceId: null,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "Account",
+                        resourceId: command.GamerEntityId,
+                        action: "CHANGE_PASSWORD",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+                }
+
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return Result<bool>.Success(true);
@@ -472,6 +492,8 @@ namespace Sayra.Backend.Application.Gamers
         private readonly IRepository<UserCredential> _userCredentialRepository;
         private readonly IRepository<GamerAccount> _gamerAccountRepository;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly ILoginProtectionService _loginProtectionService;
+        private readonly ISecurityEventService _securityEventService;
         private readonly IUnitOfWork _unitOfWork;
 
         public AuthenticateGamerCommandHandler(
@@ -481,6 +503,8 @@ namespace Sayra.Backend.Application.Gamers
             IRepository<UserCredential> userCredentialRepository,
             IRepository<GamerAccount> gamerAccountRepository,
             IPasswordHasher passwordHasher,
+            ILoginProtectionService loginProtectionService,
+            ISecurityEventService securityEventService,
             IUnitOfWork unitOfWork)
         {
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
@@ -489,6 +513,8 @@ namespace Sayra.Backend.Application.Gamers
             _userCredentialRepository = userCredentialRepository ?? throw new ArgumentNullException(nameof(userCredentialRepository));
             _gamerAccountRepository = gamerAccountRepository ?? throw new ArgumentNullException(nameof(gamerAccountRepository));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
+            _loginProtectionService = loginProtectionService ?? throw new ArgumentNullException(nameof(loginProtectionService));
+            _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
@@ -511,12 +537,38 @@ namespace Sayra.Backend.Application.Gamers
 
                 var inputLower = command.UsernameOrEmail.Trim().ToLowerInvariant();
 
+                if (await _loginProtectionService.IsLockedOutAsync(inputLower, cancellationToken))
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "ACCOUNT_LOCKED",
+                        actorId: null,
+                        actorType: "ANONYMOUS",
+                        deviceId: null,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "Account",
+                        resourceId: null,
+                        action: "LOGIN",
+                        result: "LOCKED",
+                        failureReason: "Login blocked due to active account lockout.",
+                        cancellationToken: cancellationToken);
+
+                    return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
+                    {
+                        IsSuccess = false,
+                        ErrorCode = "ACCOUNT_LOCKED",
+                        ErrorMessage = "Account is temporarily locked due to too many failed login attempts."
+                    });
+                }
+
                 // Lookup User and Gamer records
                 var user = await _userRepository.FirstOrDefaultAsync(u => u.Username.ToLower() == inputLower || (u.Email != null && u.Email.ToLower() == inputLower), track: true, cancellationToken);
                 var gamer = await _gamerRepository.FirstOrDefaultAsync(g => g.Username.ToLower() == inputLower || (g.Email != null && g.Email.ToLower() == inputLower), track: true, cancellationToken);
 
                 if (user == null && gamer == null)
                 {
+                    await _loginProtectionService.RecordFailedAttemptAsync(inputLower, null, failureReason: "User not found", cancellationToken: cancellationToken);
+
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                     {
                         IsSuccess = false,
@@ -580,6 +632,8 @@ namespace Sayra.Backend.Application.Gamers
 
                 if (string.IsNullOrEmpty(hash) || string.IsNullOrEmpty(salt))
                 {
+                    await _loginProtectionService.RecordFailedAttemptAsync(inputLower, user?.Id ?? gamer?.Id, failureReason: "Missing credentials", cancellationToken: cancellationToken);
+
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                     {
                         IsSuccess = false,
@@ -591,19 +645,7 @@ namespace Sayra.Backend.Application.Gamers
                 bool isPasswordValid = _passwordHasher.VerifyPassword(command.Password, hash, salt, algo);
                 if (!isPasswordValid)
                 {
-                    if (user != null)
-                    {
-                        user.RecordFailedLoginAttempt(maxAttempts: 5, lockoutDuration: TimeSpan.FromMinutes(15));
-                        _userRepository.Update(user);
-                    }
-
-                    if (gamerCredential != null)
-                    {
-                        gamerCredential.RecordFailedAttempt(maxAttempts: 5, lockoutDuration: TimeSpan.FromMinutes(15));
-                        _gamerCredentialRepository.Update(gamerCredential);
-                    }
-
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _loginProtectionService.RecordFailedAttemptAsync(inputLower, user?.Id ?? gamer?.Id, failureReason: "Invalid credentials", cancellationToken: cancellationToken);
 
                     return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
                     {
@@ -614,6 +656,22 @@ namespace Sayra.Backend.Application.Gamers
                 }
 
                 // Successful login -> Reset failed attempt counters and record login
+                await _loginProtectionService.ResetAttemptsAsync(inputLower, user?.Id ?? gamer?.Id, cancellationToken);
+
+                await _securityEventService.RecordSecurityEventAsync(
+                    eventType: "LOGIN_SUCCESS",
+                    actorId: user?.Id ?? gamer?.Id,
+                    actorType: user != null ? "User" : "Gamer",
+                    deviceId: null,
+                    organizationId: user?.OrganizationEntityId,
+                    siteId: user?.SiteEntityId,
+                    resourceType: "Account",
+                    resourceId: user?.Id ?? gamer?.Id,
+                    action: "LOGIN",
+                    result: "SUCCESS",
+                    failureReason: null,
+                    cancellationToken: cancellationToken);
+
                 if (user != null)
                 {
                     user.RecordSuccessfulLogin();

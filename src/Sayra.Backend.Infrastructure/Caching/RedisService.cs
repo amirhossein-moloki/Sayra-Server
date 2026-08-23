@@ -106,6 +106,25 @@ namespace Sayra.Backend.Infrastructure.Caching
             }
         }
 
+        public async Task<long> IncrementAsync(string key, TimeSpan? expiry = null, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                long newValue = await _database.StringIncrementAsync(key);
+                if (expiry.HasValue && newValue == 1)
+                {
+                    await _database.KeyExpireAsync(key, expiry.Value);
+                }
+                return newValue;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Redis IncrementAsync failed for key {Key}. Degrading gracefully.", MaskKey(key));
+                return 1;
+            }
+        }
+
         public async Task<bool> RemoveAsync(string key, CancellationToken cancellationToken = default)
         {
             try

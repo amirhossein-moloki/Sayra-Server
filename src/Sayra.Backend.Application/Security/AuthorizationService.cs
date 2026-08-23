@@ -8,23 +8,27 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Entities;
+using Sayra.Backend.Shared;
 
 namespace Sayra.Backend.Application.Security
 {
     public class AuthorizationService : IAuthorizationService
     {
         private readonly IRepository<AuditEvent> _auditEventRepository;
+        private readonly ISecurityEventService? _securityEventService;
         private readonly IRepository<UserResourceAccess>? _userResourceAccessRepository;
         private readonly IRepository<UserRoleEntity>? _userRoleRepository;
 
         public AuthorizationService(
             IRepository<AuditEvent> auditEventRepository,
             IRepository<UserResourceAccess>? userResourceAccessRepository = null,
-            IRepository<UserRoleEntity>? userRoleRepository = null)
+            IRepository<UserRoleEntity>? userRoleRepository = null,
+            ISecurityEventService? securityEventService = null)
         {
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _userResourceAccessRepository = userResourceAccessRepository;
             _userRoleRepository = userRoleRepository;
+            _securityEventService = securityEventService;
         }
 
         public async Task<AuthorizationResult> AuthorizeAsync(
@@ -311,6 +315,36 @@ namespace Sayra.Backend.Application.Security
                 };
 
                 await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
+
+                if (_securityEventService != null)
+                {
+                    string secEventType = eventType switch
+                    {
+                        "RESOURCE_ACCESS_GRANTED" => "AUTHORIZATION_GRANTED",
+                        "RESOURCE_ACCESS_DENIED" => "RESOURCE_ACCESS_DENIED",
+                        "AUTHORIZATION_DENIED" => "AUTHORIZATION_DENIED",
+                        "CROSS_SITE_ACCESS_DENIED" => "RESOURCE_ACCESS_DENIED",
+                        "CROSS_ORGANIZATION_ACCESS_DENIED" => "RESOURCE_ACCESS_DENIED",
+                        _ => eventType
+                    };
+
+                    string result = eventType.EndsWith("GRANTED", StringComparison.OrdinalIgnoreCase) ? "GRANTED" : "DENIED";
+
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: secEventType,
+                        actorId: principal?.UserId ?? principal?.GamerId,
+                        actorType: principal?.GamerId.HasValue == true ? "Gamer" : (principal?.UserId.HasValue == true ? "User" : "ANONYMOUS"),
+                        deviceId: principal?.PcId,
+                        organizationId: principal?.OrganizationId,
+                        siteId: principal?.SiteId,
+                        resourceType: "Permission",
+                        resourceId: null,
+                        action: permission,
+                        result: result,
+                        failureReason: result == "DENIED" ? reason : null,
+                        correlationId: CorrelationContext.CorrelationId,
+                        cancellationToken: cancellationToken);
+                }
             }
             catch
             {

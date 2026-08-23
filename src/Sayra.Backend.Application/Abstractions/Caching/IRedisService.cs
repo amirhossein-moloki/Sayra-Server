@@ -12,6 +12,7 @@ namespace Sayra.Backend.Application.Abstractions.Caching
         Task SetStringAsync(string key, string value, TimeSpan? expiry = null, CancellationToken cancellationToken = default);
         Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class;
         Task SetAsync<T>(string key, T value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) where T : class;
+        Task<long> IncrementAsync(string key, TimeSpan? expiry = null, CancellationToken cancellationToken = default);
         Task<bool> RemoveAsync(string key, CancellationToken cancellationToken = default);
         Task<bool> PingAsync(CancellationToken cancellationToken = default);
     }

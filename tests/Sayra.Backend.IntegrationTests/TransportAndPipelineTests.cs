@@ -219,6 +219,7 @@ namespace Sayra.Backend.IntegrationTests
             public Task SetStringAsync(string key, string value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) => Task.CompletedTask;
             public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class => Task.FromResult<T?>(null);
             public Task SetAsync<T>(string key, T value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) where T : class => Task.CompletedTask;
+            public Task<long> IncrementAsync(string key, TimeSpan? expiry = null, CancellationToken cancellationToken = default) => Task.FromResult<long>(1);
             public Task<bool> RemoveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(true);
             public Task<bool> PingAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
         }

@@ -99,6 +99,9 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ISecureMessageService, SecureMessageService>();
             services.AddSingleton<IPasswordHasher, PasswordHasher>();
             services.AddScoped<IAuthorizationService, AuthorizationService>();
+            services.AddScoped<ISecurityEventService, SecurityEventService>();
+            services.AddScoped<ILoginProtectionService, LoginProtectionService>();
+            services.AddScoped<IAccessAuditService, AccessAuditService>();
 
             // 5. Command & Query Handlers
             services.AddScoped<ICommandHandler<CreateRoleCommand, Domain.Entities.Role>, RbacHandlers>();

@@ -16,16 +16,19 @@ namespace Sayra.Backend.Application.Security
     {
         private readonly IAuthenticationSessionService _sessionService;
         private readonly IRepository<AuditEvent> _auditEventRepository;
+        private readonly ISecurityEventService? _securityEventService;
         private readonly IUnitOfWork _unitOfWork;
 
         public LogoutCommandHandler(
             IAuthenticationSessionService sessionService,
             IRepository<AuditEvent> auditEventRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            ISecurityEventService? securityEventService = null)
         {
             _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _securityEventService = securityEventService;
         }
 
         public async Task<Result<LogoutResponseDto>> HandleAsync(LogoutCommand command, CancellationToken cancellationToken = default)
@@ -86,6 +89,24 @@ namespace Sayra.Backend.Application.Security
                     };
 
                     await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
+
+                    if (_securityEventService != null)
+                    {
+                        await _securityEventService.RecordSecurityEventAsync(
+                            eventType: "LOGOUT",
+                            actorId: session.UserId ?? session.GamerId,
+                            actorType: session.UserId.HasValue ? "User" : "Gamer",
+                            deviceId: session.PcId,
+                            organizationId: null,
+                            siteId: null,
+                            resourceType: "AuthSession",
+                            resourceId: session.Id,
+                            action: "LOGOUT",
+                            result: "SUCCESS",
+                            failureReason: null,
+                            cancellationToken: cancellationToken);
+                    }
+
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 

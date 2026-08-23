@@ -46,6 +46,9 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<Permission> Permissions { get; set; } = null!;
         public DbSet<UserRoleEntity> UserRoles { get; set; } = null!;
         public DbSet<RolePermission> RolePermissions { get; set; } = null!;
+        public DbSet<UserResourceAccess> UserResourceAccesses { get; set; } = null!;
+        public DbSet<SecurityEvent> SecurityEvents { get; set; } = null!;
+        public DbSet<LoginAttempt> LoginAttempts { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
