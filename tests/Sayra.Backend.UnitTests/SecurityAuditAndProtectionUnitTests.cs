@@ -69,8 +69,8 @@ namespace Sayra.Backend.UnitTests
             var secEventServiceMock = new Mock<ISecurityEventService>();
 
             _redisServiceMock
-                .Setup(r => r.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync("4");
+                .Setup(r => r.IncrementAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(5);
 
             _loginAttemptRepoMock
                 .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<LoginAttempt, bool>>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))

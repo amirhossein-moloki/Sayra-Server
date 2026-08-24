@@ -1,0 +1,3 @@
+## 2026-08-25 - Caching Compiled Regex for Domain Entity Validation
+**Learning:** Instantiating `new Regex(...)` inside domain entity validation methods (such as `Workstation.NormalizeAndValidate()`) causes unnecessary heap allocations and runtime pattern compilation on every validation call. Using a `private static readonly Regex` compiled instance (`RegexOptions.Compiled`) eliminates per-validation GC pressure and accelerates regex matching.
+**Action:** When validating domain formats (MAC addresses, emails, regex constraints), always use `private static readonly Regex` or `[GeneratedRegex]`.
