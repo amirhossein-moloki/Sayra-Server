@@ -370,6 +370,7 @@ namespace Sayra.Backend.Application.Gamers
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IPasswordHasher _passwordHasher;
         private readonly ISecurityEventService? _securityEventService;
+        private readonly IAuthenticationSessionService? _authenticationSessionService;
         private readonly IUnitOfWork _unitOfWork;
 
         public ChangeGamerPasswordCommandHandler(
@@ -379,7 +380,8 @@ namespace Sayra.Backend.Application.Gamers
             IRepository<AuditEvent> auditEventRepository,
             IPasswordHasher passwordHasher,
             IUnitOfWork unitOfWork,
-            ISecurityEventService? securityEventService = null)
+            ISecurityEventService? securityEventService = null,
+            IAuthenticationSessionService? authenticationSessionService = null)
         {
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
             _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
@@ -388,6 +390,7 @@ namespace Sayra.Backend.Application.Gamers
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _securityEventService = securityEventService;
+            _authenticationSessionService = authenticationSessionService;
         }
 
         public async Task<Result<bool>> HandleAsync(ChangeGamerPasswordCommand command, CancellationToken cancellationToken = default)
@@ -469,6 +472,15 @@ namespace Sayra.Backend.Application.Gamers
                         cancellationToken: cancellationToken);
                 }
 
+                if (_authenticationSessionService != null)
+                {
+                    if (user != null)
+                    {
+                        await _authenticationSessionService.RevokeAllUserSessionsAsync(user.Id, "PASSWORD_CHANGED", cancellationToken);
+                    }
+                    await _authenticationSessionService.RevokeAllGamerSessionsAsync(command.GamerEntityId, "PASSWORD_CHANGED", cancellationToken);
+                }
+
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return Result<bool>.Success(true);
@@ -494,6 +506,7 @@ namespace Sayra.Backend.Application.Gamers
         private readonly IPasswordHasher _passwordHasher;
         private readonly ILoginProtectionService _loginProtectionService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IAuthenticationSessionService? _authenticationSessionService;
         private readonly IUnitOfWork _unitOfWork;
 
         public AuthenticateGamerCommandHandler(
@@ -505,7 +518,8 @@ namespace Sayra.Backend.Application.Gamers
             IPasswordHasher passwordHasher,
             ILoginProtectionService loginProtectionService,
             ISecurityEventService securityEventService,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IAuthenticationSessionService? authenticationSessionService = null)
         {
             _gamerRepository = gamerRepository ?? throw new ArgumentNullException(nameof(gamerRepository));
             _gamerCredentialRepository = gamerCredentialRepository ?? throw new ArgumentNullException(nameof(gamerCredentialRepository));
@@ -516,6 +530,7 @@ namespace Sayra.Backend.Application.Gamers
             _loginProtectionService = loginProtectionService ?? throw new ArgumentNullException(nameof(loginProtectionService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _authenticationSessionService = authenticationSessionService;
         }
 
         public async Task<Result<AuthenticateGamerResponseDto>> HandleAsync(AuthenticateGamerCommand command, CancellationToken cancellationToken = default)
@@ -708,6 +723,20 @@ namespace Sayra.Backend.Application.Gamers
 
                 var account = await _gamerAccountRepository.FirstOrDefaultAsync(a => a.GamerEntityId == targetGamerId, track: false, cancellationToken);
 
+                string? sessionToken = null;
+                if (_authenticationSessionService != null)
+                {
+                    var authSession = await _authenticationSessionService.CreateSessionAsync(
+                        userId: user?.Id,
+                        gamerId: targetGamerId,
+                        pcId: null,
+                        deviceId: null,
+                        lifetime: TimeSpan.FromHours(24),
+                        createdBy: "AUTHENTICATION_HANDSHAKE",
+                        cancellationToken: cancellationToken);
+                    sessionToken = authSession.SessionToken;
+                }
+
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return Result<AuthenticateGamerResponseDto>.Success(new AuthenticateGamerResponseDto
@@ -716,7 +745,8 @@ namespace Sayra.Backend.Application.Gamers
                     GamerId = targetGamerId,
                     GamerBusinessId = businessId,
                     Username = username,
-                    AccountNumber = account?.AccountNumber
+                    AccountNumber = account?.AccountNumber,
+                    SessionToken = sessionToken
                 });
             }
             catch (Exception ex)

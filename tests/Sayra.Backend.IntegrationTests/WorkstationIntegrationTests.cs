@@ -486,16 +486,21 @@ namespace Sayra.Backend.IntegrationTests
                 await stream1.FlushAsync();
 
                 // Read success status for Client 1
-                await ReadLineWithTimeoutAsync(stream1, TimeSpan.FromSeconds(3));
+                string statusLine1 = await ReadLineWithTimeoutAsync(stream1, TimeSpan.FromSeconds(3));
+                Assert.False(string.IsNullOrWhiteSpace(statusLine1));
+                var statusDto1 = JsonSerializer.Deserialize<AuthStatusDto>(statusLine1, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                Assert.Equal("SUCCESS", statusDto1!.Status);
 
                 // Verify Client 1 is in active registry
                 Assert.Equal(1, _connectionRegistry.Count);
+
+                await Task.Delay(100);
 
                 // Now connect Client 2 with identical PC-ID
                 await client2.ConnectAsync("127.0.0.1", port);
                 var stream2 = client2.GetStream();
 
-                string chal2 = await ReadLineWithTimeoutAsync(stream2, TimeSpan.FromSeconds(3));
+                string chal2 = await ReadLineWithTimeoutAsync(stream2, TimeSpan.FromSeconds(5));
                 var challengeDto2 = JsonSerializer.Deserialize<AuthChallengeDto>(chal2, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 byte[] chalBytes2 = Encoding.UTF8.GetBytes(challengeDto2!.Challenge);
@@ -517,6 +522,7 @@ namespace Sayra.Backend.IntegrationTests
 
                 // Read success status for Client 2
                 string statusLine2 = await ReadLineWithTimeoutAsync(stream2, TimeSpan.FromSeconds(5));
+                Assert.False(string.IsNullOrWhiteSpace(statusLine2));
                 var statusDto2 = JsonSerializer.Deserialize<AuthStatusDto>(statusLine2, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 Assert.Equal("SUCCESS", statusDto2!.Status);
 

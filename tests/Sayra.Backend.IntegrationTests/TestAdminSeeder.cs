@@ -16,6 +16,7 @@ namespace Sayra.Backend.IntegrationTests
         {
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await db.Database.EnsureCreatedAsync();
 
             var existingUser = await db.Users.FindAsync(AdminUserId);
             if (existingUser == null)

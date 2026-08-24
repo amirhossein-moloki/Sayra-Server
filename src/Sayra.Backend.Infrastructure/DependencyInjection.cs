@@ -98,10 +98,13 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<ITcpAuthenticationService, TcpAuthenticationService>();
             services.AddSingleton<ISecureMessageService, SecureMessageService>();
             services.AddSingleton<IPasswordHasher, PasswordHasher>();
+            services.AddScoped<IAuthenticationSessionService, AuthenticationSessionService>();
             services.AddScoped<IAuthorizationService, AuthorizationService>();
             services.AddScoped<ISecurityEventService, SecurityEventService>();
             services.AddScoped<ILoginProtectionService, LoginProtectionService>();
             services.AddScoped<IAccessAuditService, AccessAuditService>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Security.LogoutCommand, LogoutResponseDto>, Sayra.Backend.Application.Security.LogoutCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Security.GetCurrentAuthenticationSessionQuery, Domain.Entities.AuthenticationSession>, Sayra.Backend.Application.Security.GetCurrentAuthenticationSessionQueryHandler>();
 
             // 5. Command & Query Handlers
             services.AddScoped<ICommandHandler<CreateRoleCommand, Domain.Entities.Role>, RbacHandlers>();
