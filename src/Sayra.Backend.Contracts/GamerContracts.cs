@@ -72,6 +72,7 @@ namespace Sayra.Backend.Contracts
         public string? GamerBusinessId { get; set; }
         public string? Username { get; set; }
         public string? AccountNumber { get; set; }
+        public string? SessionToken { get; set; }
         public string? ErrorCode { get; set; }
         public string? ErrorMessage { get; set; }
     }
