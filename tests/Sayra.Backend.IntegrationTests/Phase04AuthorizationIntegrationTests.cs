@@ -51,7 +51,7 @@ namespace Sayra.Backend.IntegrationTests
             // Create a valid Gamer record in PostgreSQL first
             var createGamerRes = await _adminClient.PostAsJsonAsync("/api/gamers", new
             {
-                username = $"gamer_test_{Guid.NewGuid():N}"[..12],
+                username = $"gamer_{Guid.NewGuid():N}"[..16],
                 email = $"gamer_{Guid.NewGuid():N}@test.dev",
                 password = "Password123!"
             });
