@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Domain;
 
 namespace Sayra.Backend.Infrastructure.Transport
 {
@@ -11,6 +12,7 @@ namespace Sayra.Backend.Infrastructure.Transport
     {
         private readonly TcpClient _tcpClient;
         private readonly Stream _stream;
+        private readonly object _stateLock = new();
         private ConnectionLifecycleState _state;
         private bool _disposed;
 
@@ -20,18 +22,29 @@ namespace Sayra.Backend.Infrastructure.Transport
             _tcpClient = tcpClient ?? throw new ArgumentNullException(nameof(tcpClient));
             _stream = stream ?? throw new ArgumentNullException(nameof(stream));
             _state = ConnectionLifecycleState.Connecting;
+            ConnectedAt = DateTime.UtcNow;
             LastActivity = DateTime.UtcNow;
         }
 
         public string ConnectionId { get; }
 
-        public ConnectionLifecycleState State => _state;
+        public ConnectionLifecycleState State
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _state;
+                }
+            }
+        }
 
         public byte[]? SessionKey { get; set; }
         public string? PcId { get; set; }
         public string? Hostname { get; set; }
         public string? SiteId { get; set; }
         public string? ClientVersion { get; set; }
+        public DateTime ConnectedAt { get; }
         public DateTime LastActivity { get; set; }
 
         public string? RemoteIpAddress
@@ -40,7 +53,7 @@ namespace Sayra.Backend.Infrastructure.Transport
             {
                 try
                 {
-                    if (_tcpClient.Client.RemoteEndPoint is System.Net.IPEndPoint ipEndPoint)
+                    if (_tcpClient.Client?.RemoteEndPoint is System.Net.IPEndPoint ipEndPoint)
                     {
                         return ipEndPoint.Address.ToString();
                     }
@@ -62,14 +75,25 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public void UpdateState(ConnectionLifecycleState newState)
         {
-            _state = newState;
+            lock (_stateLock)
+            {
+                ConnectionLifecycleValidator.ValidateTransition(_state, newState);
+                _state = newState;
+            }
         }
 
         public async Task DisconnectAsync(CancellationToken cancellationToken)
         {
             if (_disposed) return;
 
-            UpdateState(ConnectionLifecycleState.Disconnected);
+            try
+            {
+                UpdateState(ConnectionLifecycleState.Disconnected);
+            }
+            catch
+            {
+                // Already disconnected or state transition ignored on disconnect
+            }
 
             try
             {

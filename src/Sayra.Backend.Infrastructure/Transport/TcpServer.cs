@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Messaging;
@@ -29,6 +30,7 @@ namespace Sayra.Backend.Infrastructure.Transport
     public class TcpServer : IHostedService, ITcpServer, IDisposable
     {
         private readonly ITcpConnectionRegistry _connectionRegistry;
+        private readonly ITcpSessionManager _sessionManager;
         private readonly ITcpAuthenticationService _tcpAuthenticationService;
         private readonly ICryptographicService _cryptographicService;
         private readonly IRedisService _redisService;
@@ -52,7 +54,8 @@ namespace Sayra.Backend.Infrastructure.Transport
             IOptions<ServerOptions> serverOptions,
             IOptions<TlsOptions> tlsOptions,
             ILogger<TcpServer> logger,
-            IServiceScopeFactory? serviceScopeFactory = null)
+            IServiceScopeFactory? serviceScopeFactory = null,
+            ITcpSessionManager? sessionManager = null)
         {
             _connectionRegistry = connectionRegistry ?? throw new ArgumentNullException(nameof(connectionRegistry));
             _tcpAuthenticationService = tcpAuthenticationService ?? throw new ArgumentNullException(nameof(tcpAuthenticationService));
@@ -63,11 +66,12 @@ namespace Sayra.Backend.Infrastructure.Transport
             _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
             _tlsOptions = tlsOptions?.Value ?? throw new ArgumentNullException(nameof(tlsOptions));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _sessionManager = sessionManager ?? new TcpSessionManager(_connectionRegistry, _redisService, NullLogger<TcpSessionManager>.Instance);
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Starting TCP Server transport foundation with Secure Handshake Handlers...");
+            _logger.LogInformation("Starting TCP Server transport foundation with Secure Session Management...");
 
             lock (_lock)
             {
@@ -79,10 +83,8 @@ namespace Sayra.Backend.Infrastructure.Transport
 
                 _cts = new CancellationTokenSource();
 
-                // Prepare TLS Certificate if configured
                 LoadCertificate();
 
-                // Start Listening
                 var ipAddress = IPAddress.Any;
                 if (!string.IsNullOrEmpty(_serverOptions.Host) && _serverOptions.Host != "*")
                 {
@@ -147,7 +149,6 @@ namespace Sayra.Backend.Infrastructure.Transport
                     var tcpClient = await _listener!.AcceptTcpClientAsync(cancellationToken);
                     _logger.LogInformation("New TCP client connection request accepted from {RemoteEndPoint}.", tcpClient.Client.RemoteEndPoint);
 
-                    // Handle client in background task to process multiple concurrent clients safely
                     _ = Task.Run(() => HandleClientAsync(tcpClient, cancellationToken), cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -169,6 +170,7 @@ namespace Sayra.Backend.Infrastructure.Transport
         {
             var connectionId = Guid.NewGuid().ToString();
             ITcpConnection? connection = null;
+            string disconnectReason = "Normal Closure";
 
             try
             {
@@ -183,7 +185,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                     {
                         ServerCertificate = _serverCertificate,
                         ClientCertificateRequired = _tlsOptions.RequireClientCertificate,
-                        EnabledSslProtocols = SslProtocols.Tls13, // Force/Explicit TLS 1.3 support
+                        EnabledSslProtocols = SslProtocols.Tls13,
                         CertificateRevocationCheckMode = X509RevocationMode.NoCheck
                     };
 
@@ -194,23 +196,21 @@ namespace Sayra.Backend.Infrastructure.Transport
                 }
 
                 connection = new TcpConnection(connectionId, tcpClient, networkStream);
-                connection.UpdateState(ConnectionLifecycleState.Connecting);
 
-                // Register connection
-                _connectionRegistry.Register(connection);
-                _logger.LogInformation("TCP connection {ConnectionId} registered in the registry. Active count: {Count}.", connectionId, _connectionRegistry.Count);
+                // Register session in SessionManager
+                await _sessionManager.RegisterSessionAsync(connection, cancellationToken);
 
                 // Perform Handshake & Authentication
                 bool authenticated = await _tcpAuthenticationService.AuthenticateAsync(connection, cancellationToken);
                 if (!authenticated)
                 {
+                    disconnectReason = "Authentication Failed";
                     _logger.LogWarning("TCP connection {ConnectionId} failed secure handshake. Closing immediately.", connectionId);
                     return;
                 }
 
                 _logger.LogInformation("TCP connection {ConnectionId} successfully authenticated. Entering post-auth message loop.", connectionId);
 
-                // Continuous secure message parsing loop
                 var parser = new TcpFrameParser();
                 byte[] buffer = new byte[4096];
 
@@ -219,8 +219,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                     int bytesRead = await networkStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
                     if (bytesRead == 0)
                     {
+                        disconnectReason = "Client Graceful Disconnect";
                         _logger.LogInformation("TCP client on connection {ConnectionId} disconnected gracefully.", connectionId);
-                        break; // EOF reached
+                        break;
                     }
 
                     parser.Append(buffer, bytesRead);
@@ -235,6 +236,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                         }
                         catch (Exception ex)
                         {
+                            disconnectReason = $"Protocol Error: {ex.Message}";
                             _logger.LogWarning(ex, "Security or protocol violation on connection {ConnectionId}. Terminating connection.", connectionId);
                             shouldClose = true;
                             break;
@@ -249,27 +251,20 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
             catch (OperationCanceledException)
             {
+                disconnectReason = "Operation Canceled / Server Shutdown";
                 _logger.LogInformation("Operation canceled for connection {ConnectionId}.", connectionId);
             }
             catch (Exception ex)
             {
+                disconnectReason = $"Exception: {ex.Message}";
                 _logger.LogError(ex, "Connection {ConnectionId} encountered an exception.", connectionId);
             }
             finally
             {
                 if (connection != null)
                 {
-                    _connectionRegistry.Unregister(connectionId);
-
-                    // Clean up connection metadata from Redis cache and database workstation status
                     try
                     {
-                        if (Guid.TryParse(connectionId, out var connectionGuid))
-                        {
-                            var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
-                            await _redisService.RemoveAsync(redisKey);
-                        }
-
                         if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
                         {
                             using var scope = _serviceScopeFactory.CreateScope();
@@ -286,8 +281,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                         _logger.LogWarning(dbEx, "Failed to unbind workstation state for connection {ConnectionId} during disconnect.", connectionId);
                     }
 
-                    await connection.DisconnectAsync(CancellationToken.None);
-                    connection.Dispose();
+                    await _sessionManager.HandleDisconnectAsync(connectionId, disconnectReason, CancellationToken.None);
                 }
                 else
                 {
@@ -300,7 +294,6 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         private async Task ProcessSecureMessageAsync(ITcpConnection connection, string frame, CancellationToken cancellationToken)
         {
-            // Parse SecureMessageEnvelope
             Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope? envelope;
             try
             {
@@ -344,7 +337,6 @@ namespace Sayra.Backend.Infrastructure.Transport
 
             _logger.LogDebug("Successfully processed secure message frame from {ConnectionId}.", connection.ConnectionId);
 
-            // Payload is decrypted and validated. Route HEARTBEAT to handle active connection update and PONG response.
             string? plaintext = validationResult.PlaintextPayload;
             if (!string.IsNullOrEmpty(plaintext))
             {
@@ -357,30 +349,10 @@ namespace Sayra.Backend.Infrastructure.Transport
                     {
                         _logger.LogInformation("Processing HEARTBEAT for connection {ConnectionId}...", connection.ConnectionId);
 
-                        // 1. Update LastActivity in connection object
-                        connection.LastActivity = DateTime.UtcNow;
+                        // Update LastActivity in SessionManager
+                        await _sessionManager.UpdateLastActivityAsync(connection.ConnectionId, cancellationToken);
 
-                        // 2. Update/Refresh active connection metadata in Redis
-                        try
-                        {
-                            if (Guid.TryParse(connection.ConnectionId, out var connectionGuid))
-                            {
-                                var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
-                                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Security.ConnectionStateMetadata>(redisKey);
-                                if (cachedState != null)
-                                {
-                                    cachedState.LastActivity = DateTime.UtcNow;
-                                    await _redisService.SetAsync(redisKey, cachedState, TimeSpan.FromHours(24));
-                                    _logger.LogDebug("Refreshed Redis connection session for {ConnectionId}.", connection.ConnectionId);
-                                }
-                            }
-                        }
-                        catch (Exception redisEx)
-                        {
-                            _logger.LogWarning(redisEx, "Failed to update connection lastActivity in Redis for {ConnectionId}.", connection.ConnectionId);
-                        }
-
-                        // 3. Update workstation's LastSeen in Postgres database
+                        // Update workstation's LastSeen in Postgres database
                         if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
                         {
                             try
@@ -403,14 +375,12 @@ namespace Sayra.Backend.Infrastructure.Transport
                             }
                         }
 
-                        // 4. Send back a post-authentication PONG message
                         var pongMessage = new Sayra.Backend.Contracts.PongMessage
                         {
                             Type = "PONG",
                             Timestamp = DateTime.UtcNow
                         };
 
-                        // Use ISecureMessageService.SendSecureMessageAsync to send the encrypted response
                         await _secureMessageService.SendSecureMessageAsync(session, pongMessage);
                         _logger.LogInformation("Sent PONG back to connection {ConnectionId}.", connection.ConnectionId);
                     }
@@ -570,24 +540,16 @@ namespace Sayra.Backend.Infrastructure.Transport
                 _listener = null;
             }
 
-            // Close and clean up all active connections in the registry
             var activeConnections = _connectionRegistry.GetAll();
             foreach (var connection in activeConnections)
             {
                 try
                 {
                     _logger.LogInformation("Closing active connection {ConnectionId} during graceful server shutdown.", connection.ConnectionId);
-                    _connectionRegistry.Unregister(connection.ConnectionId);
 
-                    try
+                    if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
                     {
-                        if (Guid.TryParse(connection.ConnectionId, out var connectionGuid))
-                        {
-                            var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
-                            await _redisService.RemoveAsync(redisKey);
-                        }
-
-                        if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
+                        try
                         {
                             using var scope = _serviceScopeFactory.CreateScope();
                             var unbindHandler = scope.ServiceProvider.GetRequiredService<ICommandHandler<UnbindWorkstationConnectionCommand, Workstation?>>();
@@ -597,14 +559,13 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 ConnectionId = connection.ConnectionId
                             }, CancellationToken.None);
                         }
-                    }
-                    catch (Exception redisEx)
-                    {
-                        _logger.LogWarning(redisEx, "Failed to clean up Redis state for connection {ConnectionId} during server shutdown.", connection.ConnectionId);
+                        catch (Exception dbEx)
+                        {
+                            _logger.LogWarning(dbEx, "Failed to unbind workstation state for connection {ConnectionId} during server shutdown.", connection.ConnectionId);
+                        }
                     }
 
-                    await connection.DisconnectAsync(CancellationToken.None);
-                    connection.Dispose();
+                    await _sessionManager.HandleDisconnectAsync(connection.ConnectionId, "Server Shutdown", CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -634,48 +595,6 @@ namespace Sayra.Backend.Infrastructure.Transport
         {
             _cts?.Dispose();
             _serverCertificate?.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n'.
-    /// </summary>
-    public class TcpFrameParser
-    {
-        private readonly List<byte> _buffer = new();
-        private readonly object _lock = new();
-
-        public void Append(byte[] data, int length)
-        {
-            lock (_lock)
-            {
-                for (int i = 0; i < length; i++)
-                {
-                    _buffer.Add(data[i]);
-                }
-            }
-        }
-
-        public List<string> ExtractFrames()
-        {
-            var frames = new List<string>();
-            lock (_lock)
-            {
-                int index;
-                while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
-                {
-                    byte[] frameBytes = new byte[index];
-                    _buffer.CopyTo(0, frameBytes, 0, index);
-                    _buffer.RemoveRange(0, index + 1);
-
-                    string frameStr = Encoding.UTF8.GetString(frameBytes).Trim();
-                    if (!string.IsNullOrEmpty(frameStr))
-                    {
-                        frames.Add(frameStr);
-                    }
-                }
-            }
-            return frames;
         }
     }
 }

@@ -15,6 +15,7 @@ namespace Sayra.Backend.Application.Abstractions.Transport
         string? SiteId { get; set; }
         string? ClientVersion { get; set; }
         string? RemoteIpAddress { get; }
+        DateTime ConnectedAt { get; }
         DateTime LastActivity { get; set; }
         Stream GetStream();
         void UpdateState(ConnectionLifecycleState newState);

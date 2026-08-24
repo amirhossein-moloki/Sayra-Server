@@ -18,6 +18,7 @@ using Sayra.Backend.Api.Models;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Domain;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Configuration;
