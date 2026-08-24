@@ -184,7 +184,7 @@ namespace Sayra.Backend.IntegrationTests
             var secEventRepo = scope.ServiceProvider.GetRequiredService<IRepository<SecurityEvent>>();
 
             string pcId = $"PC_RED_{Guid.NewGuid():N}"[..12];
-            string rawReason = "Failure details. Password=SecretPass123! Token=eySecretTokenKey";
+            string rawReason = "Failure details. Password=SamplePassword123! Token=sample_token_abc";
 
             await secEventService.RecordSecurityEventAsync(
                 eventType: "LOGIN_FAILED",
@@ -204,8 +204,8 @@ namespace Sayra.Backend.IntegrationTests
             var ev = events[0];
 
             Assert.NotNull(ev.FailureReason);
-            Assert.DoesNotContain("SecretPass123!", ev.FailureReason);
-            Assert.DoesNotContain("eySecretTokenKey", ev.FailureReason);
+            Assert.DoesNotContain("SamplePassword123!", ev.FailureReason);
+            Assert.DoesNotContain("sample_token_abc", ev.FailureReason);
             Assert.Contains("Password=[REDACTED]", ev.FailureReason);
             Assert.Contains("Token=[REDACTED]", ev.FailureReason);
         }

@@ -177,7 +177,7 @@ All 266 unit, architecture, and integration tests across Phase 01 to Phase 04 pa
 - `Full_Authentication_Session_Lifecycle_Login_Me_And_Logout_Revocation`: Validates login session issuance, `GET /api/auth/me` with Bearer token, `POST /api/auth/logout` revocation, and fail-closed 401 unauthorized on subsequent calls.
 - `Password_Change_Revokes_All_Active_Sessions`: Validates immediate revocation of all active session tokens upon password change.
 - `Disabled_Account_State_Blocks_Authentication_And_API_Access`: Validates that deactivated users and gamers are blocked from logging in or calling API endpoints.
-- `Security_Event_Redaction_And_Audit_Logging_Consistency`: Validates that sensitive strings (passwords, tokens) in security events are redacted prior to database persistence.
+- `Security_Event_Redaction_And_Audit_Logging_Consistency`: Validates that sensitive parameters (passwords, tokens) in security events are redacted prior to database persistence.
 
 ---
 
