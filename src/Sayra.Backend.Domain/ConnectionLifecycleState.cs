@@ -8,7 +8,9 @@ namespace Sayra.Backend.Domain
         Authenticating,
         Authenticated,
         Active,
-        Disconnected
+        Disconnected,
+        Degraded,
+        Terminated
     }
 
     public static class ConnectionLifecycleValidator
@@ -22,14 +24,25 @@ namespace Sayra.Backend.Domain
                 ConnectionLifecycleState.Connecting => newState is ConnectionLifecycleState.Authenticating
                                                                 or ConnectionLifecycleState.Authenticated
                                                                 or ConnectionLifecycleState.Active
-                                                                or ConnectionLifecycleState.Disconnected,
+                                                                or ConnectionLifecycleState.Disconnected
+                                                                or ConnectionLifecycleState.Terminated,
                 ConnectionLifecycleState.Authenticating => newState is ConnectionLifecycleState.Authenticated
                                                                      or ConnectionLifecycleState.Active
-                                                                     or ConnectionLifecycleState.Disconnected,
+                                                                     or ConnectionLifecycleState.Disconnected
+                                                                     or ConnectionLifecycleState.Terminated,
                 ConnectionLifecycleState.Authenticated => newState is ConnectionLifecycleState.Active
-                                                                   or ConnectionLifecycleState.Disconnected,
-                ConnectionLifecycleState.Active => newState is ConnectionLifecycleState.Disconnected,
-                ConnectionLifecycleState.Disconnected => false,
+                                                                   or ConnectionLifecycleState.Degraded
+                                                                   or ConnectionLifecycleState.Disconnected
+                                                                   or ConnectionLifecycleState.Terminated,
+                ConnectionLifecycleState.Active => newState is ConnectionLifecycleState.Degraded
+                                                           or ConnectionLifecycleState.Disconnected
+                                                           or ConnectionLifecycleState.Terminated,
+                ConnectionLifecycleState.Degraded => newState is ConnectionLifecycleState.Active
+                                                             or ConnectionLifecycleState.Authenticated
+                                                             or ConnectionLifecycleState.Disconnected
+                                                             or ConnectionLifecycleState.Terminated,
+                ConnectionLifecycleState.Disconnected => newState is ConnectionLifecycleState.Terminated,
+                ConnectionLifecycleState.Terminated => false,
                 _ => false
             };
         }
