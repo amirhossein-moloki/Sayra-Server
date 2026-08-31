@@ -205,6 +205,7 @@ namespace Sayra.Backend.Infrastructure
 
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
+            services.AddSingleton<ITcpSessionManager, TcpSessionManager>();
 
             services.AddSingleton<TcpServer>();
             services.AddSingleton<ITcpServer>(provider => provider.GetRequiredService<TcpServer>());

@@ -16,6 +16,7 @@ using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
+using Sayra.Backend.Infrastructure.Transport;
 
 namespace Sayra.Backend.Infrastructure.Security
 {
@@ -23,16 +24,19 @@ namespace Sayra.Backend.Infrastructure.Security
     {
         private readonly IClientAuthenticationService _clientAuthenticationService;
         private readonly IRedisService _redisService;
+        private readonly ITcpSessionManager? _sessionManager;
         private readonly ILogger<TcpAuthenticationService> _logger;
 
         public TcpAuthenticationService(
             IClientAuthenticationService clientAuthenticationService,
             IRedisService redisService,
-            ILogger<TcpAuthenticationService> logger)
+            ILogger<TcpAuthenticationService> logger,
+            ITcpSessionManager? sessionManager = null)
         {
             _clientAuthenticationService = clientAuthenticationService ?? throw new ArgumentNullException(nameof(clientAuthenticationService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _sessionManager = sessionManager;
         }
 
         public async Task<bool> AuthenticateAsync(ITcpConnection connection, CancellationToken cancellationToken)
@@ -55,6 +59,15 @@ namespace Sayra.Backend.Infrastructure.Security
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(5)); // Handshake timeout
+
+                if (_sessionManager != null)
+                {
+                    await _sessionManager.TransitionStateAsync(connection, ConnectionLifecycleState.Authenticating, cts.Token);
+                }
+                else
+                {
+                    connection.UpdateState(ConnectionLifecycleState.Authenticating);
+                }
 
                 // 1. Generate challenge using delegated authentication service
                 string challengeBase64 = await _clientAuthenticationService.GenerateChallengeAsync(connection, cts.Token);
@@ -126,33 +139,16 @@ namespace Sayra.Backend.Infrastructure.Security
                 await stream.WriteAsync(successBytes, 0, successBytes.Length, cts.Token);
                 await stream.FlushAsync(cts.Token);
 
-                // 6. Transition Connection Lifecycle State to Active
-                connection.UpdateState(ConnectionLifecycleState.Active);
-
-                // 7. Cache connection state metadata in Redis securely
-                try
+                // 6. Transition Connection Lifecycle State to Active (or Authenticated then Active)
+                if (_sessionManager != null)
                 {
-                    if (Guid.TryParse(connection.ConnectionId, out var connectionGuid))
-                    {
-                        var redisKey = RedisKeyGenerator.ConnectionStateKey(connectionGuid);
-                        var metadata = new ConnectionStateMetadata
-                        {
-                            ConnectionId = connection.ConnectionId,
-                            State = "Active",
-                            PcId = connection.PcId,
-                            Hostname = connection.Hostname,
-                            SiteId = connection.SiteId,
-                            ClientVersion = connection.ClientVersion,
-                            AuthenticatedAt = DateTime.UtcNow,
-                            ConnectedAt = DateTime.UtcNow,
-                            LastActivity = DateTime.UtcNow
-                        };
-                        await _redisService.SetAsync(redisKey, metadata, TimeSpan.FromHours(24));
-                    }
+                    await _sessionManager.TransitionStateAsync(connection, ConnectionLifecycleState.Authenticated, cts.Token);
+                    await _sessionManager.TransitionStateAsync(connection, ConnectionLifecycleState.Active, cts.Token);
                 }
-                catch (Exception redisEx)
+                else
                 {
-                    _logger.LogWarning(redisEx, "Failed to cache connection state in Redis for {ConnectionId}.", connection.ConnectionId);
+                    connection.UpdateState(ConnectionLifecycleState.Authenticated);
+                    connection.UpdateState(ConnectionLifecycleState.Active);
                 }
 
                 isSuccess = true;
@@ -179,13 +175,13 @@ namespace Sayra.Backend.Infrastructure.Security
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Authentication handshake timed out or was canceled for connection {ConnectionId}.", connection.ConnectionId);
-                connection.UpdateState(ConnectionLifecycleState.Disconnected);
+                await TransitionDisconnectedAsync(connection);
                 return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during authentication handshake for connection {ConnectionId}.", connection.ConnectionId);
-                connection.UpdateState(ConnectionLifecycleState.Disconnected);
+                await TransitionDisconnectedAsync(connection);
                 return false;
             }
             finally
@@ -219,7 +215,19 @@ namespace Sayra.Backend.Infrastructure.Security
                 // Ignore failures trying to write to failing socket
             }
 
-            connection.UpdateState(ConnectionLifecycleState.Disconnected);
+            await TransitionDisconnectedAsync(connection);
+        }
+
+        private async Task TransitionDisconnectedAsync(ITcpConnection connection)
+        {
+            if (_sessionManager != null)
+            {
+                await _sessionManager.TransitionStateAsync(connection, ConnectionLifecycleState.Disconnected);
+            }
+            else
+            {
+                connection.UpdateState(ConnectionLifecycleState.Disconnected);
+            }
         }
 
         private static async Task<string?> ReadLineWithLimitAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
@@ -261,18 +269,5 @@ namespace Sayra.Backend.Infrastructure.Security
 
             return Encoding.UTF8.GetString(ms.ToArray());
         }
-    }
-
-    public class ConnectionStateMetadata
-    {
-        public string ConnectionId { get; set; } = string.Empty;
-        public string State { get; set; } = string.Empty;
-        public string? PcId { get; set; }
-        public string? Hostname { get; set; }
-        public string? SiteId { get; set; }
-        public string? ClientVersion { get; set; }
-        public DateTime AuthenticatedAt { get; set; }
-        public DateTime ConnectedAt { get; set; }
-        public DateTime LastActivity { get; set; }
     }
 }

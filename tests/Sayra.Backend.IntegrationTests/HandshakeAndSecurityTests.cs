@@ -213,7 +213,7 @@ namespace Sayra.Backend.IntegrationTests
 
                 // 5. Verify Redis connection state caching
                 var redisKey = RedisKeyGenerator.ConnectionStateKey(Guid.Parse(conn.ConnectionId));
-                var cachedState = await _redisService.GetAsync<ConnectionStateMetadata>(redisKey);
+                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Transport.ConnectionStateMetadata>(redisKey);
                 Assert.NotNull(cachedState);
                 Assert.Equal("Active", cachedState.State);
                 Assert.Equal("PC-TEST-01", cachedState.PcId);
@@ -910,7 +910,7 @@ namespace Sayra.Backend.IntegrationTests
 
                 // 5. Verify Redis connection state refreshed
                 var redisKey = RedisKeyGenerator.ConnectionStateKey(Guid.Parse(connection.ConnectionId));
-                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Security.ConnectionStateMetadata>(redisKey);
+                var cachedState = await _redisService.GetAsync<Sayra.Backend.Infrastructure.Transport.ConnectionStateMetadata>(redisKey);
                 Assert.NotNull(cachedState);
                 Assert.True(cachedState.LastActivity >= initialLastActivity);
             }

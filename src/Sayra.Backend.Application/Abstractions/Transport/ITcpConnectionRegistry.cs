@@ -7,6 +7,7 @@ namespace Sayra.Backend.Application.Abstractions.Transport
         void Register(ITcpConnection connection);
         void Unregister(string connectionId);
         ITcpConnection? Get(string connectionId);
+        ITcpConnection? GetByPcId(string pcId);
         IEnumerable<ITcpConnection> GetAll();
         int Count { get; }
     }
