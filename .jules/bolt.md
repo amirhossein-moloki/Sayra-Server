@@ -1,0 +1,3 @@
+## 2026-08-30 - Avoid `.ToLower()` in EF Core LINQ Predicates on Indexed DB Columns
+**Learning:** Using `.ToLower()` on database entity properties inside EF Core LINQ predicates (e.g. `r.Status.ToLower() == "active"`) translates to `LOWER(column)` in PostgreSQL SQL queries. This prevents PostgreSQL from using standard B-tree indexes on `Status`, forcing expensive table scans or function-based index requirements on every HTTP request user principal lookup.
+**Action:** Always use direct string comparison (e.g., `r.Status == "Active"`) when querying indexed status columns in EF Core LINQ predicates.

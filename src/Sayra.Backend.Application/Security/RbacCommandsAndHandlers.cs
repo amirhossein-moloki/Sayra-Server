@@ -414,7 +414,8 @@ namespace Sayra.Backend.Application.Security
                 return Result<List<string>>.Success(new List<string>());
             }
 
-            var activeRoles = await _roleRepository.FindAsync(r => roleIds.Contains(r.Id) && r.Status.ToLower() == "active", track: false, cancellationToken: cancellationToken);
+            // Direct string comparison ("Active") allows EF Core to utilize PostgreSQL B-tree indexes on Status, avoiding lower() function wrap overhead in database queries.
+            var activeRoles = await _roleRepository.FindAsync(r => roleIds.Contains(r.Id) && r.Status == "Active", track: false, cancellationToken: cancellationToken);
             var activeRoleIds = activeRoles.Select(r => r.Id).ToList();
 
             if (!activeRoleIds.Any())
@@ -430,7 +431,7 @@ namespace Sayra.Backend.Application.Security
                 return Result<List<string>>.Success(new List<string>());
             }
 
-            var activePermissions = await _permissionRepository.FindAsync(p => permIds.Contains(p.Id) && p.Status.ToLower() == "active", track: false, cancellationToken: cancellationToken);
+            var activePermissions = await _permissionRepository.FindAsync(p => permIds.Contains(p.Id) && p.Status == "Active", track: false, cancellationToken: cancellationToken);
             var permCodes = activePermissions.Select(p => p.Code).Distinct().ToList();
 
             return Result<List<string>>.Success(permCodes);
