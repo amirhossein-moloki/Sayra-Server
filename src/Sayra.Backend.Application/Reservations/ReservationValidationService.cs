@@ -93,9 +93,11 @@ namespace Sayra.Backend.Application.Reservations
                     return Result.Failure("WORKSTATION_SITE_MISMATCH", $"Workstation '{ws.PcId}' does not belong to Site '{site.Code}'.");
                 }
 
-                // Workstation Overlap Validation
-                var allReservations = await _reservationRepository.GetAllAsync(track: false, cancellationToken);
-                var existingWsReservations = allReservations.Where(r => r.WorkstationId == workstationId.Value).ToList();
+                // Workstation Overlap Validation - execute indexed database predicate search rather than full table scan via GetAllAsync()
+                var existingWsReservations = await _reservationRepository.FindAsync(
+                    r => r.WorkstationId == workstationId.Value,
+                    track: false,
+                    cancellationToken);
                 var hasConflict = existingWsReservations.Any(r =>
                     r.IsActiveOrConfirmed() &&
                     r.StartTimeUtc < endTimeUtc &&
@@ -144,14 +146,15 @@ namespace Sayra.Backend.Application.Reservations
             }
             else
             {
-                // Lookup active/confirmed reservation by gamerId, siteId, workstationId
-                var allReservations = await _reservationRepository.GetAllAsync(track: false, cancellationToken);
-                var queryReservations = allReservations.Where(
+                // Lookup active/confirmed reservation by gamerId, siteId, workstationId - execute indexed database lookup rather than full table scan via GetAllAsync()
+                var matchingReservations = await _reservationRepository.FindAsync(
                     r => (gamerId == null || r.GamerId == gamerId) &&
                          (siteId == null || r.SiteId == siteId) &&
-                         (workstationId == null || r.WorkstationId == workstationId));
+                         (workstationId == null || r.WorkstationId == workstationId),
+                    track: false,
+                    cancellationToken);
 
-                reservation = queryReservations
+                reservation = matchingReservations
                     .Where(r => r.IsActiveOrConfirmed())
                     .OrderByDescending(r => r.CreatedAt)
                     .FirstOrDefault();

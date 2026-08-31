@@ -139,7 +139,7 @@ namespace Sayra.Backend.UnitTests
                 Status = "CONFIRMED"
             };
 
-            mockReservationRepo.Setup(r => r.GetAllAsync(false, It.IsAny<CancellationToken>()))
+            mockReservationRepo.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Reservation, bool>>>(), false, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<Reservation> { existingReservation });
 
             var service = new ReservationValidationService(
