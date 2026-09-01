@@ -509,6 +509,81 @@ namespace Sayra.Backend.Infrastructure.Transport
                             _logger.LogWarning(ackEx, "Failed to process COMMAND_ACK for connection {ConnectionId}.", connection.ConnectionId);
                         }
                     }
+                    else if (msgType.Equals("TELEMETRY", StringComparison.OrdinalIgnoreCase) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing TELEMETRY for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);
+                        try
+                        {
+                            JsonElement telemElem = root;
+                            if (root.TryGetProperty("telemetry", out var tProp) || root.TryGetProperty("Telemetry", out tProp) || root.TryGetProperty("payload", out tProp))
+                            {
+                                telemElem = tProp;
+                            }
+
+                            var model = JsonSerializer.Deserialize<Sayra.Backend.Contracts.TelemetryModel>(telemElem.GetRawText(), new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            });
+
+                            if (model != null)
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
+                                var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Telemetry.IngestTelemetryCommand, bool>>();
+
+                                var pcIdUpper = connection.PcId?.Trim().ToUpperInvariant() ?? "";
+                                var workstation = dbContext.Workstations.FirstOrDefault(w => w.PcId == pcIdUpper);
+                                var wsId = workstation?.Id ?? Guid.Empty;
+
+                                var command = new Sayra.Backend.Application.Telemetry.IngestTelemetryCommand(wsId, connection.PcId ?? "", model);
+                                var result = await handler.HandleAsync(command, cancellationToken);
+
+                                if (!result.IsSuccess)
+                                {
+                                    _logger.LogWarning("Telemetry processing rejected for connection {ConnectionId}: {Reason}", connection.ConnectionId, result.ErrorMessage);
+                                }
+                            }
+                        }
+                        catch (Exception telemEx)
+                        {
+                            _logger.LogWarning(telemEx, "Failed to process TELEMETRY for connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
+                    else if ((msgType.Equals("CLIENT_EVENT", StringComparison.OrdinalIgnoreCase) || msgType.Equals("EVENT", StringComparison.OrdinalIgnoreCase)) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing CLIENT_EVENT for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);
+                        try
+                        {
+                            JsonElement evtElem = root;
+                            if (root.TryGetProperty("event", out var eProp) || root.TryGetProperty("Event", out eProp) || root.TryGetProperty("payload", out eProp))
+                            {
+                                evtElem = eProp;
+                            }
+
+                            var evtDto = JsonSerializer.Deserialize<Sayra.Backend.Contracts.ClientEventEnvelopeDto>(evtElem.GetRawText(), new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            });
+
+                            if (evtDto != null)
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.Events.IngestClientEventCommand, bool>>();
+
+                                var command = new Sayra.Backend.Application.Events.IngestClientEventCommand(connection.PcId ?? "", evtDto);
+                                var result = await handler.HandleAsync(command, cancellationToken);
+
+                                if (!result.IsSuccess)
+                                {
+                                    _logger.LogWarning("Client event processing rejected for connection {ConnectionId}: {Reason}", connection.ConnectionId, result.ErrorMessage);
+                                }
+                            }
+                        }
+                        catch (Exception evtEx)
+                        {
+                            _logger.LogWarning(evtEx, "Failed to process CLIENT_EVENT for connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
                     else if ((msgType.Equals("EXECUTION_RESULT", StringComparison.OrdinalIgnoreCase) || msgType.Equals("COMMAND_RESULT", StringComparison.OrdinalIgnoreCase)) && _serviceScopeFactory != null)
                     {
                         _logger.LogInformation("Processing EXECUTION_RESULT for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);

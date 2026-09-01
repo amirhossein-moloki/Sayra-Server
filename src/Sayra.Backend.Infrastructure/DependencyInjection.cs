@@ -215,6 +215,12 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQuery, RemoteCommandResponseDto?>, Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQuery, System.Collections.Generic.IReadOnlyList<RemoteCommandResponseDto>>, Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQueryHandler>();
 
+            // Telemetry Handlers
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Telemetry.IngestTelemetryCommand, bool>, Sayra.Backend.Application.Telemetry.IngestTelemetryCommandHandler>();
+
+            // Event Handlers
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Events.IngestClientEventCommand, bool>, Sayra.Backend.Application.Events.IngestClientEventCommandHandler>();
+
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionManager, CommunicationSessionManager>();
