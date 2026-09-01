@@ -233,6 +233,8 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<IUdpDiscoveryServer>(provider => provider.GetRequiredService<UdpDiscoveryServer>());
             services.AddHostedService(provider => provider.GetRequiredService<UdpDiscoveryServer>());
 
+            services.AddHostedService<LivenessMonitoringWorker>();
+
             // 7. Health Checks
             services.AddHealthChecks()
                 .AddDbContextCheck<ApplicationDbContext>(
