@@ -491,6 +491,49 @@ namespace Sayra.Backend.Infrastructure.Transport
                         await _secureMessageService.SendSecureMessageAsync(session, pongMessage);
                         _logger.LogInformation("Sent PONG back to connection {ConnectionId}.", connection.ConnectionId);
                     }
+                    else if (msgType.Equals("COMMAND_ACK", StringComparison.OrdinalIgnoreCase) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing COMMAND_ACK for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);
+                        try
+                        {
+                            string cmdId = TryGetStringProperty(root, "commandId") ?? TryGetStringProperty(root, "CommandId") ?? "";
+                            string status = TryGetStringProperty(root, "status") ?? TryGetStringProperty(root, "Status") ?? "ACKNOWLEDGED";
+                            string? reason = TryGetStringProperty(root, "failureReason") ?? TryGetStringProperty(root, "FailureReason");
+
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var cmdManager = scope.ServiceProvider.GetRequiredService<IRemoteCommandManager>();
+                            await cmdManager.ProcessCommandAckAsync(cmdId, connection.PcId ?? "", status, reason, cancellationToken);
+                        }
+                        catch (Exception ackEx)
+                        {
+                            _logger.LogWarning(ackEx, "Failed to process COMMAND_ACK for connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
+                    else if ((msgType.Equals("EXECUTION_RESULT", StringComparison.OrdinalIgnoreCase) || msgType.Equals("COMMAND_RESULT", StringComparison.OrdinalIgnoreCase)) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing EXECUTION_RESULT for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);
+                        try
+                        {
+                            string cmdId = TryGetStringProperty(root, "commandId") ?? TryGetStringProperty(root, "CommandId") ?? "";
+                            string status = TryGetStringProperty(root, "status") ?? TryGetStringProperty(root, "Status") ?? "Executed";
+                            string? message = TryGetStringProperty(root, "message") ?? TryGetStringProperty(root, "Message");
+                            string? errorCode = TryGetStringProperty(root, "errorCode") ?? TryGetStringProperty(root, "ErrorCode");
+
+                            string? resultPayload = null;
+                            if (root.TryGetProperty("result", out var resProp) || root.TryGetProperty("Result", out resProp))
+                            {
+                                resultPayload = resProp.ValueKind == JsonValueKind.String ? resProp.GetString() : resProp.GetRawText();
+                            }
+
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var cmdManager = scope.ServiceProvider.GetRequiredService<IRemoteCommandManager>();
+                            await cmdManager.ProcessCommandResultAsync(cmdId, connection.PcId ?? "", status, message, errorCode, resultPayload, cancellationToken);
+                        }
+                        catch (Exception resEx)
+                        {
+                            _logger.LogWarning(resEx, "Failed to process EXECUTION_RESULT for connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
                     else if (msgType.Equals("SESSION_COMMAND_REQUEST", StringComparison.OrdinalIgnoreCase) && _serviceScopeFactory != null)
                     {
                         _logger.LogInformation("Processing SESSION_COMMAND_REQUEST for connection {ConnectionId}...", connection.ConnectionId);
@@ -713,6 +756,15 @@ namespace Sayra.Backend.Infrastructure.Transport
             _serverCertificate?.Dispose();
 
             _logger.LogInformation("TCP Server transport stopped successfully.");
+        }
+
+        private static string? TryGetStringProperty(JsonElement element, string propertyName)
+        {
+            if (element.TryGetProperty(propertyName, out var prop))
+            {
+                return prop.GetString();
+            }
+            return null;
         }
 
         public void Dispose()

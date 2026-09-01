@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using StackExchange.Redis;
 using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Communication;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
@@ -203,6 +204,17 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingRulesQuery, System.Collections.Generic.List<PricingRuleResponseDto>>, Sayra.Backend.Application.Pricing.GetPricingRulesQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.ResolveRateQuery, ResolvedRateResponseDto>, Sayra.Backend.Application.Pricing.ResolveRateQueryHandler>();
 
+            // Remote Command Infrastructure Services & CQRS Handlers
+            services.AddScoped<IRemoteCommandRepository, RemoteCommandRepository>();
+            services.AddScoped<IRemoteCommandManager, RemoteCommandManager>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.CreateRemoteCommand, RemoteCommandResponseDto>, Sayra.Backend.Application.Commands.CreateRemoteCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandAckCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandAckCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandResultCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandResultCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.CancelRemoteCommand, bool>, Sayra.Backend.Application.Commands.CancelRemoteCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandByIdQuery, RemoteCommandResponseDto?>, Sayra.Backend.Application.Commands.GetRemoteCommandByIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQuery, RemoteCommandResponseDto?>, Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQuery, System.Collections.Generic.IReadOnlyList<RemoteCommandResponseDto>>, Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQueryHandler>();
+
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionManager, CommunicationSessionManager>();
@@ -234,6 +246,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddHostedService(provider => provider.GetRequiredService<UdpDiscoveryServer>());
 
             services.AddHostedService<LivenessMonitoringWorker>();
+            services.AddHostedService<RemoteCommandTimeoutWorker>();
 
             // 7. Health Checks
             services.AddHealthChecks()

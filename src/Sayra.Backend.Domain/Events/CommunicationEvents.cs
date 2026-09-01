@@ -78,4 +78,35 @@ namespace Sayra.Backend.Domain.Events
         string Reason,
         DateTime TerminatedAt,
         string CorrelationId = "") : DomainEvent(Guid.NewGuid(), TerminatedAt, CorrelationId);
+
+    // Remote Command Events
+    public record RemoteCommandCreatedEvent(
+        string CommandId,
+        string CommandType,
+        Guid TargetWorkstationId,
+        string TargetPcId,
+        string RequestedBy,
+        DateTime CreatedAt,
+        string CorrelationId = "") : DomainEvent(Guid.NewGuid(), CreatedAt, CorrelationId);
+
+    public record RemoteCommandStateChangedEvent(
+        string CommandId,
+        string CommandType,
+        Guid TargetWorkstationId,
+        string TargetPcId,
+        string OldStatus,
+        string NewStatus,
+        DateTime Timestamp,
+        string CorrelationId = "") : DomainEvent(Guid.NewGuid(), Timestamp, CorrelationId);
+
+    public record RemoteCommandCompletedEvent(
+        string CommandId,
+        string CommandType,
+        Guid TargetWorkstationId,
+        string TargetPcId,
+        string FinalStatus,
+        string? ErrorCode,
+        string? FailureReason,
+        DateTime CompletedAt,
+        string CorrelationId = "") : DomainEvent(Guid.NewGuid(), CompletedAt, CorrelationId);
 }
