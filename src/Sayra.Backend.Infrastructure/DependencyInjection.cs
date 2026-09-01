@@ -242,6 +242,10 @@ namespace Sayra.Backend.Infrastructure
                 .AddCheck<RedisHealthCheck>(
                     name: "Redis",
                     failureStatus: HealthStatus.Unhealthy,
+                    tags: new[] { "ready" })
+                .AddCheck<TcpServerHealthCheck>(
+                    name: "TcpServer",
+                    failureStatus: HealthStatus.Unhealthy,
                     tags: new[] { "ready" });
 
             return services;

@@ -18,17 +18,42 @@ namespace Sayra.Backend.Infrastructure.Transport
     }
 
     /// <summary>
-    /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n'.
+    /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n',
+    /// enforcing maximum message frame size limits for memory protection.
     /// </summary>
     public class TcpFrameParser
     {
         private readonly List<byte> _buffer = new();
         private readonly object _lock = new();
+        private readonly int _maxMessageSize;
+
+        public TcpFrameParser(int maxMessageSize = 65536)
+        {
+            _maxMessageSize = maxMessageSize > 0 ? maxMessageSize : 65536;
+        }
 
         public void Append(byte[] data, int length)
         {
             lock (_lock)
             {
+                if (_buffer.Count + length > _maxMessageSize && !_buffer.Contains((byte)'\n'))
+                {
+                    bool containsNewlineInNewData = false;
+                    for (int i = 0; i < length; i++)
+                    {
+                        if (data[i] == (byte)'\n')
+                        {
+                            containsNewlineInNewData = true;
+                            break;
+                        }
+                    }
+
+                    if (!containsNewlineInNewData)
+                    {
+                        throw new InvalidOperationException($"Maximum message frame size ({_maxMessageSize} bytes) exceeded.");
+                    }
+                }
+
                 for (int i = 0; i < length; i++)
                 {
                     _buffer.Add(data[i]);
@@ -44,6 +69,12 @@ namespace Sayra.Backend.Infrastructure.Transport
                 int index;
                 while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
                 {
+                    if (index > _maxMessageSize)
+                    {
+                        _buffer.Clear();
+                        throw new InvalidOperationException($"Frame length ({index} bytes) exceeds maximum limit of {_maxMessageSize} bytes.");
+                    }
+
                     byte[] frameBytes = new byte[index];
                     _buffer.CopyTo(0, frameBytes, 0, index);
                     _buffer.RemoveRange(0, index + 1);
@@ -53,6 +84,12 @@ namespace Sayra.Backend.Infrastructure.Transport
                     {
                         frames.Add(frameStr);
                     }
+                }
+
+                if (_buffer.Count > _maxMessageSize)
+                {
+                    _buffer.Clear();
+                    throw new InvalidOperationException($"Accumulated frame buffer ({_buffer.Count} bytes) exceeds maximum limit of {_maxMessageSize} bytes.");
                 }
             }
             return frames;
