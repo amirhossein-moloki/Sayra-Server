@@ -225,5 +225,49 @@ namespace Sayra.Backend.UnitTests
             Assert.Equal("AUTH_FAILED", ex.ErrorCode);
             Assert.Contains("Too many failed authentication attempts", ex.Message);
         }
+
+        [Fact]
+        public async Task ValidateResponseAsync_WhenNoSessionExists_ShouldFail()
+        {
+            // Arrange
+            var responseDto = new AuthResponseDto
+            {
+                Hmac = Convert.ToBase64String(new byte[32]),
+                EncryptedSessionKey = Convert.ToBase64String(new byte[32]),
+                Iv = Convert.ToBase64String(new byte[16]),
+                PcId = "PC-UNKNOWN"
+            };
+
+            // Act
+            var result = await _service.ValidateResponseAsync(_connMock.Object, responseDto);
+
+            // Assert
+            Assert.False(result.IsSuccess);
+            Assert.Equal("AUTH_FAILED", result.ErrorCode);
+            Assert.Contains("Authentication session not found", result.ErrorMessage);
+        }
+
+        [Fact]
+        public async Task CleanupSession_ShouldRemoveTrackingForConnection()
+        {
+            // Arrange
+            await _service.GenerateChallengeAsync(_connMock.Object);
+
+            // Act
+            _service.CleanupSession("conn-id-123");
+
+            var responseDto = new AuthResponseDto
+            {
+                Hmac = Convert.ToBase64String(new byte[32]),
+                EncryptedSessionKey = Convert.ToBase64String(new byte[32]),
+                Iv = Convert.ToBase64String(new byte[16]),
+                PcId = "PC-01"
+            };
+            var result = await _service.ValidateResponseAsync(_connMock.Object, responseDto);
+
+            // Assert
+            Assert.False(result.IsSuccess);
+            Assert.Contains("Authentication session not found", result.ErrorMessage);
+        }
     }
 }
