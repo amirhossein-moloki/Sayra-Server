@@ -48,6 +48,18 @@ namespace Sayra.Backend.Infrastructure.Configuration
             if (serverOptions.MaximumMessageSize < 1024)
                 throw new InvalidOperationException($"Invalid configuration 'Server:MaximumMessageSize': {serverOptions.MaximumMessageSize}. Must be at least 1024 bytes.");
 
+            if (serverOptions.HeartbeatInterval <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Server:HeartbeatInterval': {serverOptions.HeartbeatInterval}. Must be greater than 0 seconds.");
+
+            if (serverOptions.HeartbeatTimeout <= serverOptions.HeartbeatInterval)
+                throw new InvalidOperationException($"Invalid configuration 'Server:HeartbeatTimeout': {serverOptions.HeartbeatTimeout}. Must be strictly greater than HeartbeatInterval ({serverOptions.HeartbeatInterval}s).");
+
+            if (serverOptions.HeartbeatGracePeriod < 0)
+                throw new InvalidOperationException($"Invalid configuration 'Server:HeartbeatGracePeriod': {serverOptions.HeartbeatGracePeriod}. Cannot be negative.");
+
+            if (serverOptions.LivenessCheckInterval <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Server:LivenessCheckInterval': {serverOptions.LivenessCheckInterval}. Must be greater than 0 seconds.");
+
             if (discoveryOptions == null)
                 throw new InvalidOperationException("Critical configuration section 'Discovery' is missing.");
 

@@ -14,5 +14,10 @@ namespace Sayra.Backend.Infrastructure.Configuration.Options
         public int ReceiveBufferSize { get; set; } = 8192;
         public int SendBufferSize { get; set; } = 8192;
         public int MaximumMessageSize { get; set; } = 65536;
+
+        public int HeartbeatInterval { get; set; } = 30;
+        public int HeartbeatTimeout { get; set; } = 90;
+        public int HeartbeatGracePeriod { get; set; } = 15;
+        public int LivenessCheckInterval { get; set; } = 15;
     }
 }
