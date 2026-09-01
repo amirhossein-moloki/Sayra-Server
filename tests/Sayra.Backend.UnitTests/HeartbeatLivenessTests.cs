@@ -30,7 +30,7 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void ConfigurationValidator_ServerOptions_HeartbeatValidation_PassesValidConfig()
         {
-            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres" };
+            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=test_user;Password=dummy_test_pwd" };
             var redisOpt = new RedisOptions { ConnectionString = "localhost:6379" };
             var discOpt = new DiscoveryOptions { UdpPort = 37020 };
             var serverOpt = new ServerOptions
@@ -55,7 +55,7 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void ConfigurationValidator_ServerOptions_InvalidHeartbeatInterval_ThrowsInvalidOperationException()
         {
-            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres" };
+            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=test_user;Password=dummy_test_pwd" };
             var redisOpt = new RedisOptions { ConnectionString = "localhost:6379" };
             var discOpt = new DiscoveryOptions { UdpPort = 37020 };
             var serverOpt = new ServerOptions { HeartbeatInterval = 0 };
@@ -66,7 +66,7 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void ConfigurationValidator_ServerOptions_HeartbeatTimeoutLessThanInterval_ThrowsInvalidOperationException()
         {
-            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres" };
+            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=test_user;Password=dummy_test_pwd" };
             var redisOpt = new RedisOptions { ConnectionString = "localhost:6379" };
             var discOpt = new DiscoveryOptions { UdpPort = 37020 };
             var serverOpt = new ServerOptions
@@ -81,7 +81,7 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void ConfigurationValidator_ServerOptions_NegativeGracePeriod_ThrowsInvalidOperationException()
         {
-            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres" };
+            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=test_user;Password=dummy_test_pwd" };
             var redisOpt = new RedisOptions { ConnectionString = "localhost:6379" };
             var discOpt = new DiscoveryOptions { UdpPort = 37020 };
             var serverOpt = new ServerOptions
@@ -95,7 +95,7 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void ConfigurationValidator_ServerOptions_InvalidLivenessCheckInterval_ThrowsInvalidOperationException()
         {
-            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres" };
+            var dbOpt = new DatabaseOptions { ConnectionString = "Host=localhost;Database=test;Username=test_user;Password=dummy_test_pwd" };
             var redisOpt = new RedisOptions { ConnectionString = "localhost:6379" };
             var discOpt = new DiscoveryOptions { UdpPort = 37020 };
             var serverOpt = new ServerOptions
