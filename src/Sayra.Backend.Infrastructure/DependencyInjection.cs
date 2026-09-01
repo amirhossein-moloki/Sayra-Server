@@ -203,6 +203,24 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingRulesQuery, System.Collections.Generic.List<PricingRuleResponseDto>>, Sayra.Backend.Application.Pricing.GetPricingRulesQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.ResolveRateQuery, ResolvedRateResponseDto>, Sayra.Backend.Application.Pricing.ResolveRateQueryHandler>();
 
+            // Phase 05 Communication Session Foundation Services & Handlers
+            services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
+            services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionManager, CommunicationSessionManager>();
+            services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.IHeartbeatProcessor, HeartbeatProcessor>();
+            services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationMessageDispatcher, CommunicationMessageDispatcher>();
+
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.EstablishConnectionCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.EstablishConnectionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.AuthenticateConnectionCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.AuthenticateConnectionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.ActivateConnectionCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.ActivateConnectionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.ProcessHeartbeatCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.ProcessHeartbeatCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.DisconnectConnectionCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.DisconnectConnectionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Communication.TerminateCommunicationSessionCommand, Sayra.Backend.Application.Communication.CommunicationSessionDto>, Sayra.Backend.Application.Communication.TerminateCommunicationSessionCommandHandler>();
+
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Communication.GetCommunicationSessionByIdQuery, Sayra.Backend.Application.Communication.CommunicationSessionDto?>, Sayra.Backend.Application.Communication.GetCommunicationSessionByIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Communication.GetCommunicationSessionByConnectionIdQuery, Sayra.Backend.Application.Communication.CommunicationSessionDto?>, Sayra.Backend.Application.Communication.GetCommunicationSessionByConnectionIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Communication.GetCommunicationSessionByPcIdQuery, Sayra.Backend.Application.Communication.CommunicationSessionDto?>, Sayra.Backend.Application.Communication.GetCommunicationSessionByPcIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Communication.GetActiveCommunicationSessionsQuery, System.Collections.Generic.IReadOnlyList<Sayra.Backend.Application.Communication.CommunicationSessionDto>>, Sayra.Backend.Application.Communication.GetActiveCommunicationSessionsQueryHandler>();
+
             // 6. TCP & UDP Transport Services
             services.AddSingleton<ITcpConnectionRegistry, TcpConnectionRegistry>();
             services.AddSingleton<ITcpSessionManager, TcpSessionManager>();
