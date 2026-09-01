@@ -30,6 +30,24 @@ namespace Sayra.Backend.Infrastructure.Configuration
             if (serverOptions.Port <= 0 || serverOptions.Port > 65535)
                 throw new InvalidOperationException($"Invalid critical configuration 'Server:Port': {serverOptions.Port}. Must be between 1 and 65535.");
 
+            if (serverOptions.HandshakeTimeout < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:HandshakeTimeout': {serverOptions.HandshakeTimeout}. Must be at least 1 second.");
+
+            if (serverOptions.ConnectionTimeout < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:ConnectionTimeout': {serverOptions.ConnectionTimeout}. Must be at least 1 second.");
+
+            if (serverOptions.MaximumConnections < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:MaximumConnections': {serverOptions.MaximumConnections}. Must be at least 1.");
+
+            if (serverOptions.ReceiveBufferSize < 1024)
+                throw new InvalidOperationException($"Invalid configuration 'Server:ReceiveBufferSize': {serverOptions.ReceiveBufferSize}. Must be at least 1024 bytes.");
+
+            if (serverOptions.SendBufferSize < 1024)
+                throw new InvalidOperationException($"Invalid configuration 'Server:SendBufferSize': {serverOptions.SendBufferSize}. Must be at least 1024 bytes.");
+
+            if (serverOptions.MaximumMessageSize < 1024)
+                throw new InvalidOperationException($"Invalid configuration 'Server:MaximumMessageSize': {serverOptions.MaximumMessageSize}. Must be at least 1024 bytes.");
+
             if (discoveryOptions == null)
                 throw new InvalidOperationException("Critical configuration section 'Discovery' is missing.");
 

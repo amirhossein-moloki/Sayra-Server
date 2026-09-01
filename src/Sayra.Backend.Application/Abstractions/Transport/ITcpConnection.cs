@@ -19,6 +19,8 @@ namespace Sayra.Backend.Application.Abstractions.Transport
         DateTime LastActivity { get; set; }
         Stream GetStream();
         void UpdateState(ConnectionLifecycleState newState);
+        Task SendAsync(byte[] data, CancellationToken cancellationToken = default);
+        Task SendFrameAsync(string frame, CancellationToken cancellationToken = default);
         Task DisconnectAsync(CancellationToken cancellationToken);
     }
 }

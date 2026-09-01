@@ -17,6 +17,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Application.Abstractions.Communication;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
@@ -44,6 +45,19 @@ namespace Sayra.Backend.Infrastructure.Transport
         private Task? _listenerTask;
         private X509Certificate2? _serverCertificate;
         private readonly object _lock = new();
+
+        public bool IsListening
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _listener != null;
+                }
+            }
+        }
+
+        public int ActiveConnectionsCount => _connectionRegistry.Count;
 
         public TcpServer(
             ITcpConnectionRegistry connectionRegistry,
@@ -97,7 +111,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                 _listener = new TcpListener(ipAddress, _serverOptions.Port);
                 try
                 {
-                    _listener.Start();
+                    _listener.Start(_serverOptions.Backlog);
                 }
                 catch (Exception ex)
                 {
@@ -105,7 +119,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                     throw;
                 }
 
-                _logger.LogInformation("TCP Server successfully listening on {Host}:{Port}.", ipAddress, _serverOptions.Port);
+                _logger.LogInformation("TCP Server successfully listening on {Host}:{Port} with max connections {MaxConn}.", ipAddress, _serverOptions.Port, _serverOptions.MaximumConnections);
 
                 _listenerTask = AcceptConnectionsAsync(_cts.Token);
             }
@@ -147,6 +161,25 @@ namespace Sayra.Backend.Infrastructure.Transport
                 try
                 {
                     var tcpClient = await _listener!.AcceptTcpClientAsync(cancellationToken);
+
+                    if (_connectionRegistry.Count >= _serverOptions.MaximumConnections)
+                    {
+                        _logger.LogWarning("Maximum simultaneous connection limit reached ({Limit}). Rejecting connection from {RemoteEndPoint}.",
+                            _serverOptions.MaximumConnections, tcpClient.Client.RemoteEndPoint);
+                        tcpClient.Close();
+                        tcpClient.Dispose();
+                        continue;
+                    }
+
+                    if (_serverOptions.ReceiveBufferSize > 0)
+                    {
+                        tcpClient.ReceiveBufferSize = _serverOptions.ReceiveBufferSize;
+                    }
+                    if (_serverOptions.SendBufferSize > 0)
+                    {
+                        tcpClient.SendBufferSize = _serverOptions.SendBufferSize;
+                    }
+
                     _logger.LogInformation("New TCP client connection request accepted from {RemoteEndPoint}.", tcpClient.Client.RemoteEndPoint);
 
                     _ = Task.Run(() => HandleClientAsync(tcpClient, cancellationToken), cancellationToken);
@@ -174,6 +207,25 @@ namespace Sayra.Backend.Infrastructure.Transport
 
             try
             {
+                string remoteIp = tcpClient.Client?.RemoteEndPoint is IPEndPoint ep ? ep.Address.ToString() : "Unknown";
+
+                if (_serviceScopeFactory != null)
+                {
+                    try
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var commManager = scope.ServiceProvider.GetService<ICommunicationSessionManager>();
+                        if (commManager != null)
+                        {
+                            await commManager.EstablishSessionAsync(connectionId, remoteIp, null, cancellationToken);
+                        }
+                    }
+                    catch (Exception commEx)
+                    {
+                        _logger.LogWarning(commEx, "Failed to establish CommunicationSession for connection {ConnectionId}.", connectionId);
+                    }
+                }
+
                 Stream networkStream = tcpClient.GetStream();
 
                 if (_serverCertificate != null)
@@ -189,7 +241,10 @@ namespace Sayra.Backend.Infrastructure.Transport
                         CertificateRevocationCheckMode = X509RevocationMode.NoCheck
                     };
 
-                    await sslStream.AuthenticateAsServerAsync(sslOptions, cancellationToken);
+                    using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    handshakeCts.CancelAfter(TimeSpan.FromSeconds(_serverOptions.HandshakeTimeout));
+
+                    await sslStream.AuthenticateAsServerAsync(sslOptions, handshakeCts.Token);
                     networkStream = sslStream;
 
                     _logger.LogInformation("TLS 1.3 Handshake completed successfully on connection {ConnectionId}.", connectionId);
@@ -209,10 +264,28 @@ namespace Sayra.Backend.Infrastructure.Transport
                     return;
                 }
 
+                if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
+                {
+                    try
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var commManager = scope.ServiceProvider.GetService<ICommunicationSessionManager>();
+                        if (commManager != null)
+                        {
+                            await commManager.AuthenticateSessionAsync(connectionId, connection.PcId, null, cancellationToken);
+                            await commManager.ActivateSessionAsync(connectionId, cancellationToken);
+                        }
+                    }
+                    catch (Exception commEx)
+                    {
+                        _logger.LogWarning(commEx, "Failed to authenticate CommunicationSession for connection {ConnectionId}.", connectionId);
+                    }
+                }
+
                 _logger.LogInformation("TCP connection {ConnectionId} successfully authenticated. Entering post-auth message loop.", connectionId);
 
-                var parser = new TcpFrameParser();
-                byte[] buffer = new byte[4096];
+                var parser = new TcpFrameParser(_serverOptions.MaximumMessageSize);
+                byte[] buffer = new byte[8192];
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
@@ -251,8 +324,8 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
             catch (OperationCanceledException)
             {
-                disconnectReason = "Operation Canceled / Server Shutdown";
-                _logger.LogInformation("Operation canceled for connection {ConnectionId}.", connectionId);
+                disconnectReason = "Operation Canceled / Timeout / Shutdown";
+                _logger.LogInformation("Operation canceled or handshake timed out for connection {ConnectionId}.", connectionId);
             }
             catch (Exception ex)
             {
@@ -279,6 +352,23 @@ namespace Sayra.Backend.Infrastructure.Transport
                     catch (Exception dbEx)
                     {
                         _logger.LogWarning(dbEx, "Failed to unbind workstation state for connection {ConnectionId} during disconnect.", connectionId);
+                    }
+
+                    if (_serviceScopeFactory != null)
+                    {
+                        try
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var commManager = scope.ServiceProvider.GetService<ICommunicationSessionManager>();
+                            if (commManager != null)
+                            {
+                                await commManager.DisconnectSessionAsync(connectionId, disconnectReason, CancellationToken.None);
+                            }
+                        }
+                        catch (Exception commEx)
+                        {
+                            _logger.LogWarning(commEx, "Failed to disconnect CommunicationSession for connection {ConnectionId}.", connectionId);
+                        }
                     }
 
                     await _sessionManager.HandleDisconnectAsync(connectionId, disconnectReason, CancellationToken.None);
@@ -351,6 +441,23 @@ namespace Sayra.Backend.Infrastructure.Transport
 
                         // Update LastActivity in SessionManager
                         await _sessionManager.UpdateLastActivityAsync(connection.ConnectionId, cancellationToken);
+
+                        if (_serviceScopeFactory != null)
+                        {
+                            try
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var commManager = scope.ServiceProvider.GetService<ICommunicationSessionManager>();
+                                if (commManager != null)
+                                {
+                                    await commManager.RecordHeartbeatAsync(connection.ConnectionId, DateTime.UtcNow, cancellationToken);
+                                }
+                            }
+                            catch (Exception commEx)
+                            {
+                                _logger.LogWarning(commEx, "Failed to record heartbeat in CommunicationSession for {ConnectionId}.", connection.ConnectionId);
+                            }
+                        }
 
                         // Update workstation's LastSeen in Postgres database
                         if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
@@ -562,6 +669,23 @@ namespace Sayra.Backend.Infrastructure.Transport
                         catch (Exception dbEx)
                         {
                             _logger.LogWarning(dbEx, "Failed to unbind workstation state for connection {ConnectionId} during server shutdown.", connection.ConnectionId);
+                        }
+                    }
+
+                    if (_serviceScopeFactory != null)
+                    {
+                        try
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var commManager = scope.ServiceProvider.GetService<ICommunicationSessionManager>();
+                            if (commManager != null)
+                            {
+                                await commManager.DisconnectSessionAsync(connection.ConnectionId, "Server Shutdown", CancellationToken.None);
+                            }
+                        }
+                        catch (Exception commEx)
+                        {
+                            _logger.LogWarning(commEx, "Failed to disconnect CommunicationSession for connection {ConnectionId} during server shutdown.", connection.ConnectionId);
                         }
                     }
 
