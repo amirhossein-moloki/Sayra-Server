@@ -9,7 +9,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Sayra.Backend.Application.Abstractions.Caching;
+using Sayra.Backend.Infrastructure.Configuration.Options;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
@@ -25,23 +27,26 @@ namespace Sayra.Backend.Infrastructure.Security
         private readonly IClientAuthenticationService _clientAuthenticationService;
         private readonly IRedisService _redisService;
         private readonly ITcpSessionManager? _sessionManager;
+        private readonly ServerOptions _serverOptions;
         private readonly ILogger<TcpAuthenticationService> _logger;
 
         public TcpAuthenticationService(
             IClientAuthenticationService clientAuthenticationService,
             IRedisService redisService,
             ILogger<TcpAuthenticationService> logger,
+            IOptions<ServerOptions>? serverOptions = null,
             ITcpSessionManager? sessionManager = null)
         {
             _clientAuthenticationService = clientAuthenticationService ?? throw new ArgumentNullException(nameof(clientAuthenticationService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _serverOptions = serverOptions?.Value ?? new ServerOptions();
             _sessionManager = sessionManager;
         }
 
         public async Task<bool> AuthenticateAsync(ITcpConnection connection, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Starting secure TCP authentication handshake delegation for connection {ConnectionId}...", connection.ConnectionId);
+            _logger.LogInformation("AUTHENTICATION_STARTED: ConnectionId {ConnectionId}", connection.ConnectionId);
 
             Stream stream;
             try
@@ -58,7 +63,8 @@ namespace Sayra.Backend.Infrastructure.Security
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(5)); // Handshake timeout
+                int handshakeTimeoutSeconds = _serverOptions.HandshakeTimeout > 0 ? _serverOptions.HandshakeTimeout : 15;
+                cts.CancelAfter(TimeSpan.FromSeconds(handshakeTimeoutSeconds));
 
                 if (_sessionManager != null)
                 {
@@ -88,7 +94,7 @@ namespace Sayra.Backend.Infrastructure.Security
                 string? responseLine = await ReadLineWithLimitAsync(stream, 8192, cts.Token); // 8KB limit
                 if (string.IsNullOrEmpty(responseLine))
                 {
-                    _logger.LogWarning("Connection {ConnectionId} closed or timed out before sending AUTH_RESPONSE.", connection.ConnectionId);
+                    _logger.LogWarning("AUTHENTICATION_TIMEOUT: Connection {ConnectionId} closed or timed out before sending AUTH_RESPONSE.", connection.ConnectionId);
                     await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Timeout or empty response", cts.Token);
                     return false;
                 }
@@ -103,14 +109,14 @@ namespace Sayra.Backend.Infrastructure.Security
                 }
                 catch (JsonException ex)
                 {
-                    _logger.LogWarning(ex, "Connection {ConnectionId} sent malformed JSON in AUTH_RESPONSE.", connection.ConnectionId);
+                    _logger.LogWarning(ex, "AUTHENTICATION_PROTOCOL_VIOLATION: Connection {ConnectionId} sent malformed JSON in AUTH_RESPONSE.", connection.ConnectionId);
                     await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Malformed JSON payload", cts.Token);
                     return false;
                 }
 
                 if (responseDto == null)
                 {
-                    _logger.LogWarning("Connection {ConnectionId} sent empty AUTH_RESPONSE.", connection.ConnectionId);
+                    _logger.LogWarning("AUTHENTICATION_PROTOCOL_VIOLATION: Connection {ConnectionId} sent empty AUTH_RESPONSE.", connection.ConnectionId);
                     await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Empty payload", cts.Token);
                     return false;
                 }
@@ -119,12 +125,12 @@ namespace Sayra.Backend.Infrastructure.Security
                 var authResult = await _clientAuthenticationService.ValidateResponseAsync(connection, responseDto, cts.Token);
                 if (!authResult.IsSuccess)
                 {
-                    _logger.LogWarning("Authentication failed for connection {ConnectionId}: {ErrorCode} - {Message}", connection.ConnectionId, authResult.ErrorCode, authResult.ErrorMessage);
+                    _logger.LogWarning("AUTHENTICATION_FAILED: Connection {ConnectionId}: ErrorCode={ErrorCode}, Message={Message}", connection.ConnectionId, authResult.ErrorCode, authResult.ErrorMessage);
                     await SendAuthStatusAndCloseAsync(connection, stream, authResult.ErrorCode ?? "AUTH_FAILED", authResult.ErrorMessage ?? "Authentication failed", cts.Token);
                     return false;
                 }
 
-                _logger.LogInformation("Connection {ConnectionId} successfully authenticated. Device PC-ID: {PcId}.", connection.ConnectionId, connection.PcId);
+                _logger.LogInformation("AUTHENTICATION_SUCCEEDED: Connection {ConnectionId} successfully authenticated. Device PC-ID: {PcId}.", connection.ConnectionId, connection.PcId);
 
                 // 5. Send success AUTH_STATUS to client
                 var successStatus = new AuthStatusDto
@@ -174,7 +180,7 @@ namespace Sayra.Backend.Infrastructure.Security
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning("Authentication handshake timed out or was canceled for connection {ConnectionId}.", connection.ConnectionId);
+                _logger.LogWarning("AUTHENTICATION_TIMEOUT: Handshake timed out or was canceled for connection {ConnectionId}.", connection.ConnectionId);
                 await TransitionDisconnectedAsync(connection);
                 return false;
             }
