@@ -204,6 +204,12 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.GetPricingRulesQuery, System.Collections.Generic.List<PricingRuleResponseDto>>, Sayra.Backend.Application.Pricing.GetPricingRulesQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Pricing.ResolveRateQuery, ResolvedRateResponseDto>, Sayra.Backend.Application.Pricing.ResolveRateQueryHandler>();
 
+            // Configuration Repositories
+            services.AddScoped<IConfigurationPackageRepository, ConfigurationPackageRepository>();
+            services.AddScoped<IConfigurationTargetRepository, ConfigurationTargetRepository>();
+            services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
+            services.AddScoped<IConfigurationPublicationRepository, ConfigurationPublicationRepository>();
+
             // Remote Command Infrastructure Services & CQRS Handlers
             services.AddScoped<IRemoteCommandRepository, RemoteCommandRepository>();
             services.AddScoped<IRemoteCommandManager, RemoteCommandManager>();
