@@ -221,6 +221,12 @@ namespace Sayra.Backend.Infrastructure
             // Event Handlers
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Events.IngestClientEventCommand, bool>, Sayra.Backend.Application.Events.IngestClientEventCommandHandler>();
 
+            // Configuration Control Plane Services & Handlers
+            services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
+            services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ValidateConfigurationCommand, Sayra.Backend.Application.Configuration.Models.ConfigurationValidationResult>, Sayra.Backend.Application.Configuration.ValidateConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.NormalizeConfigurationCommand, string>, Sayra.Backend.Application.Configuration.NormalizeConfigurationCommandHandler>();
+
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionManager, CommunicationSessionManager>();
