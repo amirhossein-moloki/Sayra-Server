@@ -37,6 +37,9 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
+        public DbSet<ConfigurationTarget> ConfigurationTargets { get; set; } = null!;
+        public DbSet<ConfigurationAssignment> ConfigurationAssignments { get; set; } = null!;
+        public DbSet<ConfigurationPublication> ConfigurationPublications { get; set; } = null!;
         public DbSet<SystemUpdate> SystemUpdates { get; set; } = null!;
         public DbSet<PricingPlan> PricingPlans { get; set; } = null!;
         public DbSet<PricingRule> PricingRules { get; set; } = null!;

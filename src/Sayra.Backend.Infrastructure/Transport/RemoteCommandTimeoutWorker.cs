@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Communication;
@@ -9,15 +10,15 @@ namespace Sayra.Backend.Infrastructure.Transport
 {
     public class RemoteCommandTimeoutWorker : BackgroundService
     {
-        private readonly IRemoteCommandManager _remoteCommandManager;
+        private readonly Microsoft.Extensions.DependencyInjection.IServiceScopeFactory _scopeFactory;
         private readonly ILogger<RemoteCommandTimeoutWorker> _logger;
         private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(15);
 
         public RemoteCommandTimeoutWorker(
-            IRemoteCommandManager remoteCommandManager,
+            Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopeFactory,
             ILogger<RemoteCommandTimeoutWorker> logger)
         {
-            _remoteCommandManager = remoteCommandManager ?? throw new ArgumentNullException(nameof(remoteCommandManager));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -33,7 +34,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                 {
                     if (await timer.WaitForNextTickAsync(stoppingToken))
                     {
-                        await _remoteCommandManager.EvaluateTimeoutsAsync(stoppingToken);
+                        using var scope = _scopeFactory.CreateScope();
+                        var remoteCommandManager = scope.ServiceProvider.GetRequiredService<IRemoteCommandManager>();
+                        await remoteCommandManager.EvaluateTimeoutsAsync(stoppingToken);
                     }
                 }
                 catch (OperationCanceledException)

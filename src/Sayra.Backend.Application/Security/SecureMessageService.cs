@@ -14,7 +14,7 @@ namespace Sayra.Backend.Application.Security
         private readonly ICryptographicService _cryptographicService;
         private readonly ITcpConnectionRegistry _connectionRegistry;
         private readonly ISequenceValidator? _sequenceValidator;
-        private readonly ISecurityEventService? _securityEventService;
+        private readonly Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? _scopeFactory;
         private readonly ILogger<SecureMessageService> _logger;
 
         private const int MaxPayloadLengthBytes = 10 * 1024 * 1024; // 10MB limit
@@ -24,13 +24,13 @@ namespace Sayra.Backend.Application.Security
             ITcpConnectionRegistry connectionRegistry,
             ILogger<SecureMessageService> logger,
             ISequenceValidator? sequenceValidator = null,
-            ISecurityEventService? securityEventService = null)
+            Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? scopeFactory = null)
         {
             _cryptographicService = cryptographicService ?? throw new ArgumentNullException(nameof(cryptographicService));
             _connectionRegistry = connectionRegistry ?? throw new ArgumentNullException(nameof(connectionRegistry));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _sequenceValidator = sequenceValidator;
-            _securityEventService = securityEventService;
+            _scopeFactory = scopeFactory;
         }
 
         public SecureMessageEnvelope EncryptAndSign(object payload, byte[] sessionKey)
@@ -339,17 +339,21 @@ namespace Sayra.Backend.Application.Security
 
         private async Task RecordSecurityEventAsync(ConnectionSession session, string eventType, string? failureReason)
         {
-            if (_securityEventService == null) return;
+            if (_scopeFactory == null) return;
 
             try
             {
+                using var scope = _scopeFactory.CreateScope();
+                var securityEventService = scope.ServiceProvider.GetService(typeof(ISecurityEventService)) as ISecurityEventService;
+                if (securityEventService == null) return;
+
                 Guid? resourceGuid = null;
                 if (!string.IsNullOrEmpty(session.ConnectionId) && Guid.TryParse(session.ConnectionId, out var parsedGuid))
                 {
                     resourceGuid = parsedGuid;
                 }
 
-                await _securityEventService.RecordSecurityEventAsync(
+                await securityEventService.RecordSecurityEventAsync(
                     eventType: $"SECURE_MESSAGE_{eventType}",
                     actorId: null,
                     actorType: "DEVICE",
