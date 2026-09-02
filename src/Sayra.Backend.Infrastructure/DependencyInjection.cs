@@ -223,6 +223,9 @@ namespace Sayra.Backend.Infrastructure
 
             // Configuration Control Plane Services & Handlers
             services.AddScoped<IConfigurationPackageRepository, ConfigurationPackageRepository>();
+            services.AddScoped<IWorkstationGroupRepository, WorkstationGroupRepository>();
+            services.AddScoped<IConfigurationTargetRepository, ConfigurationTargetRepository>();
+            services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
@@ -232,6 +235,16 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommand, ConfigurationPackage>, Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ReconstructConfigurationCommand, string>, Sayra.Backend.Application.Configuration.ReconstructConfigurationCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.BuildDeltaChainCommand, Sayra.Backend.Application.Configuration.DeltaChainResult>, Sayra.Backend.Application.Configuration.BuildDeltaChainCommandHandler>();
+
+            // Configuration Targeting & Assignment Handlers
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateWorkstationGroupCommand, Sayra.Backend.Application.Configuration.WorkstationGroupDto>, Sayra.Backend.Application.Configuration.CreateWorkstationGroupCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.AddWorkstationToGroupCommand, bool>, Sayra.Backend.Application.Configuration.AddWorkstationToGroupCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.RemoveWorkstationFromGroupCommand, bool>, Sayra.Backend.Application.Configuration.RemoveWorkstationFromGroupCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateConfigurationTargetCommand, Sayra.Backend.Application.Configuration.ConfigurationTargetDto>, Sayra.Backend.Application.Configuration.CreateConfigurationTargetCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.AssignConfigurationToTargetCommand, Sayra.Backend.Application.Configuration.ConfigurationAssignmentDto>, Sayra.Backend.Application.Configuration.AssignConfigurationToTargetCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.UnassignConfigurationFromTargetCommand, bool>, Sayra.Backend.Application.Configuration.UnassignConfigurationFromTargetCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetConfigurationAssignmentsQuery, System.Collections.Generic.List<Sayra.Backend.Application.Configuration.ConfigurationAssignmentDto>>, Sayra.Backend.Application.Configuration.GetConfigurationAssignmentsQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQuery, System.Collections.Generic.List<Sayra.Backend.Application.Configuration.ApplicableAssignmentDto>>, Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQueryHandler>();
 
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
