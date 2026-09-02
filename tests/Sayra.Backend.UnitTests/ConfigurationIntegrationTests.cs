@@ -148,5 +148,80 @@ namespace Sayra.Backend.UnitTests
             Assert.False(resExceeded.Value.CanUseDeltaChain);
             Assert.Contains("exceeds maximum allowed chain length", resExceeded.Value.FallbackReason);
         }
+
+        [Fact]
+        public async Task ConfigurationResolver_IntegrationWithInMemoryDbContext_ResolvesHierarchyAndFieldMerge()
+        {
+            using var dbContext = CreateInMemoryDbContext();
+
+            var pkgRepo = new ConfigurationPackageRepository(dbContext);
+            var targetRepo = new ConfigurationTargetRepository(dbContext);
+            var assignRepo = new ConfigurationAssignmentRepository(dbContext);
+            var groupRepo = new WorkstationGroupRepository(dbContext);
+            var wsRepo = new Repository<Workstation>(dbContext);
+            var orgRepo = new Repository<Organization>(dbContext);
+            var siteRepo = new Repository<Site>(dbContext);
+
+            var validator = new ConfigurationValidatorService();
+            var normalizer = new ConfigurationNormalizer(validator);
+            var deltaEngine = new ConfigurationDeltaEngine(normalizer, validator);
+
+            // 1. Seed Organization, Site, Group, Workstation
+            var org = new Organization { Name = "Org Integration", Code = "ORGINTEG", Status = "Active" };
+            await orgRepo.AddAsync(org);
+
+            var site = new Site { OrganizationId = org.Id, Name = "Site Integ", Code = "SITEINTEG", Status = "Active" };
+            await siteRepo.AddAsync(site);
+
+            var group = new WorkstationGroup { OrganizationId = org.Id, SiteId = site.Id, Name = "Group Integ", Code = "GRPINTEG", Status = "Active" };
+            await groupRepo.AddAsync(group);
+
+            var ws = new Workstation { PcId = "PC-INTEG-01", Hostname = "pc-integ-01", IpAddress = "10.0.0.50", MacAddress = "00:11:22:33:44:55", OrganizationEntityId = org.Id, SiteEntityId = site.Id };
+            await wsRepo.AddAsync(ws);
+
+            await dbContext.SaveChangesAsync();
+
+            var member = new WorkstationGroupMember { WorkstationGroupId = group.Id, WorkstationId = ws.Id, JoinedAt = DateTime.UtcNow };
+            await groupRepo.AddMemberAsync(member);
+            await dbContext.SaveChangesAsync();
+
+            // 2. Create Global and Workstation Targets & Packages
+            var globalTarget = ConfigurationTarget.CreateGlobal(org.Id);
+            await targetRepo.AddAsync(globalTarget);
+
+            var wsTarget = ConfigurationTarget.CreateWorkstation(org.Id, ws.Id, site.Id, group.Id);
+            await targetRepo.AddAsync(wsTarget);
+
+            var globalPkg = ConfigurationPackage.CreateFull("global-pkg", 1, GetSamplePayload(5000, 10, 30));
+            await pkgRepo.AddAsync(globalPkg);
+
+            var wsPkg = ConfigurationPackage.CreateFull("ws-pkg", 2, "{\"heartbeat\":{\"intervalSeconds\":5}}");
+            await pkgRepo.AddAsync(wsPkg);
+
+            await dbContext.SaveChangesAsync();
+
+            // 3. Assign Packages to Targets
+            var globalAssign = ConfigurationAssignment.Create(globalPkg.Id, globalTarget.Id);
+            var wsAssign = ConfigurationAssignment.Create(wsPkg.Id, wsTarget.Id);
+
+            await assignRepo.AddAsync(globalAssign);
+            await assignRepo.AddAsync(wsAssign);
+            await dbContext.SaveChangesAsync();
+
+            // 4. Resolve Effective Configuration
+            var resolver = new ConfigurationResolver(
+                wsRepo, orgRepo, siteRepo, groupRepo, assignRepo, targetRepo, pkgRepo,
+                deltaEngine, normalizer, validator);
+
+            var res = await resolver.ResolveEffectiveConfigurationAsync(ws.Id);
+
+            Assert.True(res.IsSuccess, res.ErrorMessage);
+            Assert.NotNull(res.Value);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(res.Value.EffectiveConfigurationJson);
+            Assert.Equal(5000, doc.RootElement.GetProperty("server").GetProperty("port").GetInt32()); // Global inherited
+            Assert.Equal(5, doc.RootElement.GetProperty("heartbeat").GetProperty("intervalSeconds").GetInt32()); // Workstation override
+            Assert.Equal(2, res.Value.AppliedSources.Count);
+        }
     }
 }

@@ -22,6 +22,7 @@ namespace Sayra.Backend.Api.Controllers
         private readonly ICommandHandler<UnassignConfigurationFromTargetCommand, bool> _unassignHandler;
         private readonly IQueryHandler<GetConfigurationAssignmentsQuery, List<ConfigurationAssignmentDto>> _getAssignmentsHandler;
         private readonly IQueryHandler<GetApplicableAssignmentsForWorkstationQuery, List<ApplicableAssignmentDto>> _getApplicableAssignmentsHandler;
+        private readonly IQueryHandler<ResolveEffectiveConfigurationQuery, Application.Configuration.Models.ConfigurationResolutionResult> _resolveEffectiveHandler;
 
         public ConfigurationTargetingController(
             ICommandHandler<CreateWorkstationGroupCommand, WorkstationGroupDto> createGroupHandler,
@@ -31,7 +32,8 @@ namespace Sayra.Backend.Api.Controllers
             ICommandHandler<AssignConfigurationToTargetCommand, ConfigurationAssignmentDto> assignHandler,
             ICommandHandler<UnassignConfigurationFromTargetCommand, bool> unassignHandler,
             IQueryHandler<GetConfigurationAssignmentsQuery, List<ConfigurationAssignmentDto>> getAssignmentsHandler,
-            IQueryHandler<GetApplicableAssignmentsForWorkstationQuery, List<ApplicableAssignmentDto>> getApplicableAssignmentsHandler)
+            IQueryHandler<GetApplicableAssignmentsForWorkstationQuery, List<ApplicableAssignmentDto>> getApplicableAssignmentsHandler,
+            IQueryHandler<ResolveEffectiveConfigurationQuery, Application.Configuration.Models.ConfigurationResolutionResult> resolveEffectiveHandler)
         {
             _createGroupHandler = createGroupHandler ?? throw new ArgumentNullException(nameof(createGroupHandler));
             _addWorkstationToGroupHandler = addWorkstationToGroupHandler ?? throw new ArgumentNullException(nameof(addWorkstationToGroupHandler));
@@ -41,6 +43,7 @@ namespace Sayra.Backend.Api.Controllers
             _unassignHandler = unassignHandler ?? throw new ArgumentNullException(nameof(unassignHandler));
             _getAssignmentsHandler = getAssignmentsHandler ?? throw new ArgumentNullException(nameof(getAssignmentsHandler));
             _getApplicableAssignmentsHandler = getApplicableAssignmentsHandler ?? throw new ArgumentNullException(nameof(getApplicableAssignmentsHandler));
+            _resolveEffectiveHandler = resolveEffectiveHandler ?? throw new ArgumentNullException(nameof(resolveEffectiveHandler));
         }
 
         [HttpPost("groups")]
@@ -169,6 +172,23 @@ namespace Sayra.Backend.Api.Controllers
                     return NotFound(new { code = result.ErrorCode, message = result.ErrorMessage });
                 }
                 return BadRequest(new { code = result.ErrorCode ?? "GET_APPLICABLE_ASSIGNMENTS_FAILED", message = result.ErrorMessage });
+            }
+            return Ok(result.Value);
+        }
+
+        [HttpGet("workstations/{workstationId:guid}/effective")]
+        [HasPermission(PermissionCatalog.ViewWorkstations)]
+        public async Task<IActionResult> GetEffectiveConfigurationAsync(Guid workstationId, CancellationToken cancellationToken)
+        {
+            var query = new ResolveEffectiveConfigurationQuery { WorkstationId = workstationId };
+            var result = await _resolveEffectiveHandler.HandleAsync(query, cancellationToken);
+            if (!result.IsSuccess)
+            {
+                if (result.ErrorCode == "WORKSTATION_NOT_FOUND" || result.ErrorCode == "SITE_NOT_FOUND" || result.ErrorCode == "ORGANIZATION_NOT_FOUND")
+                {
+                    return NotFound(new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+                return BadRequest(new { code = result.ErrorCode ?? "RESOLUTION_FAILED", message = result.ErrorMessage });
             }
             return Ok(result.Value);
         }
