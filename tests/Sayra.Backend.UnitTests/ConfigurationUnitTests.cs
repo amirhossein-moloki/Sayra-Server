@@ -4,6 +4,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Sayra.Backend.Application.Configuration;
 using Sayra.Backend.Application.Configuration.Models;
+using Sayra.Backend.Contracts;
+using Sayra.Backend.Domain;
 using Xunit;
 
 namespace Sayra.Backend.UnitTests
@@ -12,11 +14,13 @@ namespace Sayra.Backend.UnitTests
     {
         private readonly IConfigurationValidator _validator;
         private readonly IConfigurationNormalizer _normalizer;
+        private readonly IConfigurationDeltaEngine _deltaEngine;
 
         public ConfigurationUnitTests()
         {
             _validator = new ConfigurationValidatorService();
             _normalizer = new ConfigurationNormalizer(_validator);
+            _deltaEngine = new ConfigurationDeltaEngine(_normalizer, _validator);
         }
 
         private static string GetValidJsonPayload()
@@ -75,7 +79,6 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void OversizedPayload_Should_ReturnExceedsMaxSizeError()
         {
-            // Create a payload > 100 KB
             var hugeString = new string('a', 105 * 1024);
             var result = _validator.Validate(hugeString);
 
@@ -106,7 +109,6 @@ namespace Sayra.Backend.UnitTests
         [Fact]
         public void DeeplyNestedJson_Should_ReturnExceedsMaxDepthError()
         {
-            // Build JSON nested beyond 16 levels
             var json = @"{""a"":{""b"":{""c"":{""d"":{""e"":{""f"":{""g"":{""h"":{""i"":{""j"":{""k"":{""l"":{""m"":{""n"":{""o"":{""p"":{""q"":{""r"":1}}}}}}}}}}}}}}}}}}";
             var result = _validator.Validate(json);
 
@@ -159,7 +161,7 @@ namespace Sayra.Backend.UnitTests
                 Heartbeat = new HeartbeatConfigurationSection
                 {
                     IntervalSeconds = 30,
-                    TimeoutSeconds = 10 // Invalid: timeout <= interval
+                    TimeoutSeconds = 10
                 }
             };
 
@@ -327,6 +329,120 @@ namespace Sayra.Backend.UnitTests
             {
                 Assert.DoesNotContain("SuperSecretTokenString", err.Message);
             }
+        }
+
+        // STAGE 06-03 NEW TESTS
+
+        [Fact]
+        public void ConfigurationPackage_CreateFull_SetsPropertiesCorrectly()
+        {
+            var normalizedJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+            var pkg = ConfigurationPackage.CreateFull("default", 1, normalizedJson, "1.0", "admin");
+
+            Assert.Equal("default", pkg.Name);
+            Assert.Equal(1, pkg.VersionNumber);
+            Assert.Equal("v1", pkg.Version);
+            Assert.Null(pkg.BaseVersionNumber);
+            Assert.Equal(ConfigurationPayloadType.Full, pkg.PayloadType);
+            Assert.Equal("1.0", pkg.SchemaVersion);
+            Assert.Equal(normalizedJson, pkg.Content);
+            Assert.Equal("admin", pkg.IssuedBy);
+            Assert.True(pkg.IsActive);
+        }
+
+        [Fact]
+        public void ConfigurationPackage_CreateDelta_EnforcesBaseVersionRules()
+        {
+            var deltaJson = @"[{""op"":""replace"",""path"":""/heartbeat/intervalSeconds"",""value"":15}]";
+
+            // Valid delta
+            var pkg = ConfigurationPackage.CreateDelta("default", 2, 1, deltaJson, "1.0", "admin");
+            Assert.Equal(2, pkg.VersionNumber);
+            Assert.Equal(1, pkg.BaseVersionNumber);
+            Assert.Equal(ConfigurationPayloadType.Delta, pkg.PayloadType);
+
+            // Base version >= Target version should throw
+            Assert.Throws<ArgumentException>(() => ConfigurationPackage.CreateDelta("default", 1, 1, deltaJson));
+            Assert.Throws<ArgumentException>(() => ConfigurationPackage.CreateDelta("default", 1, 2, deltaJson));
+        }
+
+        [Fact]
+        public void DeltaEngine_ApplyDelta_ReplaceOperation_UpdatesConfiguration()
+        {
+            var baseJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+            var deltas = new List<ConfigurationDelta>
+            {
+                new ConfigurationDelta { Op = "replace", Path = "/heartbeat/intervalSeconds", Value = 20 },
+                new ConfigurationDelta { Op = "replace", Path = "/heartbeat/timeoutSeconds", Value = 45 }
+            };
+
+            var targetJson = _deltaEngine.ApplyDelta(baseJson, deltas);
+
+            Assert.Contains(@"""intervalSeconds"":20", targetJson);
+            Assert.Contains(@"""timeoutSeconds"":45", targetJson);
+        }
+
+        [Fact]
+        public void DeltaEngine_ApplyDelta_UnsupportedOperation_ThrowsInvalidOperationException()
+        {
+            var baseJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+            var deltas = new List<ConfigurationDelta>
+            {
+                new ConfigurationDelta { Op = "invalid_op", Path = "/heartbeat/intervalSeconds", Value = 20 }
+            };
+
+            Assert.Throws<InvalidOperationException>(() => _deltaEngine.ApplyDelta(baseJson, deltas));
+        }
+
+        [Fact]
+        public void DeltaEngine_ApplyDelta_ForbiddenPath_ThrowsInvalidOperationException()
+        {
+            var baseJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+            var deltas = new List<ConfigurationDelta>
+            {
+                new ConfigurationDelta { Op = "replace", Path = "/version", Value = "2.0" }
+            };
+
+            Assert.Throws<InvalidOperationException>(() => _deltaEngine.ApplyDelta(baseJson, deltas));
+        }
+
+        [Fact]
+        public void DeltaEngine_ApplyDelta_ResultingInInvalidConfiguration_RejectsOperation()
+        {
+            var baseJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+            var deltas = new List<ConfigurationDelta>
+            {
+                // Set timeoutSeconds <= intervalSeconds (invalid semantics)
+                new ConfigurationDelta { Op = "replace", Path = "/heartbeat/timeoutSeconds", Value = 5 }
+            };
+
+            Assert.Throws<InvalidOperationException>(() => _deltaEngine.ApplyDelta(baseJson, deltas));
+        }
+
+        [Fact]
+        public void DeltaEngine_ComputeAndApplyDelta_SatisfiesInvariant()
+        {
+            var baseJson = _normalizer.NormalizeToJson(GetValidJsonPayload());
+
+            var modifiedSchemaModel = new SayraConfigurationSchema
+            {
+                Version = "1.0",
+                Server = new ServerConfigurationSection { IpAddress = "10.0.0.5", Port = 5000 },
+                Discovery = new DiscoveryConfigurationSection { Enabled = true, Port = 37020 },
+                Heartbeat = new HeartbeatConfigurationSection { IntervalSeconds = 15, TimeoutSeconds = 45 },
+                Kiosk = new KioskConfigurationSection { Enabled = true, AllowShellEscape = false, AutoLoginGamer = false, IdleTimeoutMinutes = 15 },
+                Localization = new LocalizationConfigurationSection { Culture = "en-US", TimeZone = "UTC" },
+                Security = new SecurityConfigurationSection { EnableSsl = true, RequireEncryption = true, MaxFailedAttempts = 5 }
+            };
+
+            var targetJson = _normalizer.NormalizeToJson(modifiedSchemaModel);
+
+            var computedDeltas = _deltaEngine.ComputeDelta(baseJson, targetJson);
+            Assert.NotEmpty(computedDeltas);
+
+            var reconstructedTarget = _deltaEngine.ApplyDelta(baseJson, computedDeltas);
+
+            Assert.Equal(targetJson, reconstructedTarget);
         }
     }
 }

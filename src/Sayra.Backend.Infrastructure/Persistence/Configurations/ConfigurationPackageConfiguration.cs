@@ -16,24 +16,45 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasMaxLength(100);
 
+            builder.Property(c => c.VersionNumber)
+                .IsRequired();
+
             builder.Property(c => c.Version)
                 .IsRequired()
                 .HasMaxLength(50);
+
+            builder.Property(c => c.BaseVersionNumber)
+                .IsRequired(false);
+
+            builder.Property(c => c.PayloadType)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(20);
+
+            builder.Property(c => c.SchemaVersion)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasDefaultValue("1.0");
 
             builder.Property(c => c.Content)
                 .HasColumnType("jsonb")
                 .IsRequired()
                 .HasDefaultValue("{}");
 
+            builder.Property(c => c.IssuedBy)
+                .IsRequired()
+                .HasMaxLength(100)
+                .HasDefaultValue("system");
+
             builder.Property(c => c.IsActive)
                 .IsRequired()
-                .HasDefaultValue(false);
+                .HasDefaultValue(true);
 
             builder.Property(c => c.RowVersion)
                 .IsRowVersion()
                 .IsConcurrencyToken();
 
-            builder.HasIndex(c => new { c.Name, c.Version }).IsUnique();
+            builder.HasIndex(c => new { c.Name, c.VersionNumber }).IsUnique();
         }
     }
 }
