@@ -229,6 +229,12 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
+            services.AddSingleton<Sayra.Backend.Application.Configuration.ICanonicalConfigurationSerializer, Sayra.Backend.Application.Configuration.CanonicalConfigurationSerializer>();
+            services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationHashService, Sayra.Backend.Application.Configuration.ConfigurationHashService>();
+            services.AddScoped<IConfigurationKeyRegistryRepository, ConfigurationKeyRegistryRepository>();
+            services.AddSingleton<ISigningPrivateKeyProvider, SigningPrivateKeyProvider>();
+            services.AddScoped<Sayra.Backend.Application.Configuration.IConfigurationKeyRegistry, Sayra.Backend.Application.Configuration.ConfigurationKeyRegistry>();
+            services.AddScoped<Sayra.Backend.Application.Configuration.IConfigurationSigningService, Sayra.Backend.Application.Configuration.ConfigurationSigningService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ValidateConfigurationCommand, Sayra.Backend.Application.Configuration.Models.ConfigurationValidationResult>, Sayra.Backend.Application.Configuration.ValidateConfigurationCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.NormalizeConfigurationCommand, string>, Sayra.Backend.Application.Configuration.NormalizeConfigurationCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateFullConfigurationVersionCommand, ConfigurationPackage>, Sayra.Backend.Application.Configuration.CreateFullConfigurationVersionCommandHandler>();

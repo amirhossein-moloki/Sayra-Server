@@ -50,6 +50,22 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasDefaultValue(true);
 
+            builder.Property(c => c.ConfigurationHash)
+                .HasMaxLength(64)
+                .IsRequired(false);
+
+            builder.Property(c => c.Signature)
+                .HasMaxLength(1024)
+                .IsRequired(false);
+
+            builder.Property(c => c.SignatureAlgorithm)
+                .HasMaxLength(50)
+                .IsRequired(false);
+
+            builder.Property(c => c.SigningKeyId)
+                .HasMaxLength(100)
+                .IsRequired(false);
+
             builder.Property(c => c.RowVersion)
                 .IsRowVersion()
                 .IsConcurrencyToken();
