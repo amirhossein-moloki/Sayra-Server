@@ -222,10 +222,16 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Events.IngestClientEventCommand, bool>, Sayra.Backend.Application.Events.IngestClientEventCommandHandler>();
 
             // Configuration Control Plane Services & Handlers
+            services.AddScoped<IConfigurationPackageRepository, ConfigurationPackageRepository>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
+            services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ValidateConfigurationCommand, Sayra.Backend.Application.Configuration.Models.ConfigurationValidationResult>, Sayra.Backend.Application.Configuration.ValidateConfigurationCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.NormalizeConfigurationCommand, string>, Sayra.Backend.Application.Configuration.NormalizeConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateFullConfigurationVersionCommand, ConfigurationPackage>, Sayra.Backend.Application.Configuration.CreateFullConfigurationVersionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommand, ConfigurationPackage>, Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ReconstructConfigurationCommand, string>, Sayra.Backend.Application.Configuration.ReconstructConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.BuildDeltaChainCommand, Sayra.Backend.Application.Configuration.DeltaChainResult>, Sayra.Backend.Application.Configuration.BuildDeltaChainCommandHandler>();
 
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
