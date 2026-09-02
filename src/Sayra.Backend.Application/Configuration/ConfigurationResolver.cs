@@ -21,6 +21,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationAssignmentRepository _assignmentRepository;
         private readonly IConfigurationTargetRepository _targetRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
+        private readonly IConfigurationPublicationRepository? _publicationRepository;
         private readonly IConfigurationDeltaEngine _deltaEngine;
         private readonly IConfigurationNormalizer _normalizer;
         private readonly IConfigurationValidator _validator;
@@ -35,7 +36,8 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPackageRepository packageRepository,
             IConfigurationDeltaEngine deltaEngine,
             IConfigurationNormalizer normalizer,
-            IConfigurationValidator validator)
+            IConfigurationValidator validator,
+            IConfigurationPublicationRepository? publicationRepository = null)
         {
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _organizationRepository = organizationRepository ?? throw new ArgumentNullException(nameof(organizationRepository));
@@ -47,6 +49,7 @@ namespace Sayra.Backend.Application.Configuration
             _deltaEngine = deltaEngine ?? throw new ArgumentNullException(nameof(deltaEngine));
             _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+            _publicationRepository = publicationRepository;
         }
 
         public async Task<Result<ConfigurationResolutionResult>> ResolveEffectiveConfigurationAsync(
@@ -150,6 +153,17 @@ namespace Sayra.Backend.Application.Configuration
                 {
                     // Filter out inactive/revoked packages
                     continue;
+                }
+
+                // If Publication tracking is present, enforce Active lifecycle state requirement
+                if (_publicationRepository != null)
+                {
+                    var activePub = await _publicationRepository.GetActivePublicationForTargetAsync(target.Id, cancellationToken);
+                    if (activePub == null || activePub.ConfigurationPackageId != package.Id)
+                    {
+                        // Filter out unpublished, non-active, superseded, or revoked packages
+                        continue;
+                    }
                 }
 
                 WorkstationGroup? associatedGroup = null;

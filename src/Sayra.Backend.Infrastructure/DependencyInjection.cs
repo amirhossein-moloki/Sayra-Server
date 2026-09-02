@@ -223,6 +223,7 @@ namespace Sayra.Backend.Infrastructure
 
             // Configuration Control Plane Services & Handlers
             services.AddScoped<IConfigurationPackageRepository, ConfigurationPackageRepository>();
+            services.AddScoped<IConfigurationPublicationRepository, ConfigurationPublicationRepository>();
             services.AddScoped<IWorkstationGroupRepository, WorkstationGroupRepository>();
             services.AddScoped<IConfigurationTargetRepository, ConfigurationTargetRepository>();
             services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
@@ -241,6 +242,15 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommand, ConfigurationPackage>, Sayra.Backend.Application.Configuration.CreateDeltaConfigurationVersionCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ReconstructConfigurationCommand, string>, Sayra.Backend.Application.Configuration.ReconstructConfigurationCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.BuildDeltaChainCommand, Sayra.Backend.Application.Configuration.DeltaChainResult>, Sayra.Backend.Application.Configuration.BuildDeltaChainCommandHandler>();
+
+            // Configuration Publication, Lifecycle & Rollback Handlers
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.PreparePublicationCommand, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto>, Sayra.Backend.Application.Configuration.PreparePublicationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.PublishConfigurationCommand, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto>, Sayra.Backend.Application.Configuration.PublishConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.ActivateConfigurationCommand, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto>, Sayra.Backend.Application.Configuration.ActivateConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.RevokeConfigurationCommand, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto>, Sayra.Backend.Application.Configuration.RevokeConfigurationCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.RollbackConfigurationCommand, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto>, Sayra.Backend.Application.Configuration.RollbackConfigurationCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetPublicationByIdQuery, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto?>, Sayra.Backend.Application.Configuration.GetPublicationByIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetActiveTargetPublicationQuery, Sayra.Backend.Application.Configuration.ConfigurationPublicationDto?>, Sayra.Backend.Application.Configuration.GetActiveTargetPublicationQueryHandler>();
 
             // Configuration Targeting & Assignment Handlers
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Configuration.CreateWorkstationGroupCommand, Sayra.Backend.Application.Configuration.WorkstationGroupDto>, Sayra.Backend.Application.Configuration.CreateWorkstationGroupCommandHandler>();
