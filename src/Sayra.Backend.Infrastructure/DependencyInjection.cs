@@ -32,6 +32,7 @@ namespace Sayra.Backend.Infrastructure
             // 1. Register Strongly-Typed Options Sections
             services.Configure<DatabaseOptions>(configuration.GetSection(DatabaseOptions.SectionName));
             services.Configure<RedisOptions>(configuration.GetSection(RedisOptions.SectionName));
+            services.Configure<Sayra.Backend.Application.Configuration.Models.ConfigurationCacheOptions>(configuration.GetSection(Sayra.Backend.Application.Configuration.Models.ConfigurationCacheOptions.SectionName));
             services.Configure<ServerOptions>(configuration.GetSection(ServerOptions.SectionName));
             services.Configure<DiscoveryOptions>(configuration.GetSection(DiscoveryOptions.SectionName));
             services.Configure<SecurityOptions>(configuration.GetSection(SecurityOptions.SectionName));
@@ -222,6 +223,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Events.IngestClientEventCommand, bool>, Sayra.Backend.Application.Events.IngestClientEventCommandHandler>();
 
             // Configuration Control Plane Services & Handlers
+            services.AddScoped<Sayra.Backend.Application.Configuration.IConfigurationCache, ConfigurationCache>();
             services.AddScoped<IConfigurationPackageRepository, ConfigurationPackageRepository>();
             services.AddScoped<IConfigurationPublicationRepository, ConfigurationPublicationRepository>();
             services.AddScoped<IWorkstationGroupRepository, WorkstationGroupRepository>();

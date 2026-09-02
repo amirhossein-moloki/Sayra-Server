@@ -9,6 +9,8 @@ using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Shared;
 
+#nullable enable
+
 namespace Sayra.Backend.Application.Configuration
 {
     // --- DTOs ---
@@ -208,15 +210,18 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IWorkstationGroupRepository _groupRepository;
         private readonly IRepository<Workstation> _workstationRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public AddWorkstationToGroupCommandHandler(
             IWorkstationGroupRepository groupRepository,
             IRepository<Workstation> workstationRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _groupRepository = groupRepository ?? throw new ArgumentNullException(nameof(groupRepository));
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<bool>> HandleAsync(AddWorkstationToGroupCommand command, CancellationToken cancellationToken = default)
@@ -254,6 +259,12 @@ namespace Sayra.Backend.Application.Configuration
             await _groupRepository.AddMemberAsync(member, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (_configurationCache != null)
+            {
+                await _configurationCache.InvalidateScopeAsync(group.OrganizationId, ConfigurationTargetType.Group, group.Id, cancellationToken);
+                await _configurationCache.InvalidateWorkstationAsync(group.OrganizationId, workstation.Id, cancellationToken);
+            }
+
             return Result<bool>.Success(true);
         }
     }
@@ -261,20 +272,36 @@ namespace Sayra.Backend.Application.Configuration
     public class RemoveWorkstationFromGroupCommandHandler : ICommandHandler<RemoveWorkstationFromGroupCommand, bool>
     {
         private readonly IWorkstationGroupRepository _groupRepository;
+        private readonly IRepository<Workstation> _workstationRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public RemoveWorkstationFromGroupCommandHandler(
             IWorkstationGroupRepository groupRepository,
-            IUnitOfWork unitOfWork)
+            IRepository<Workstation> workstationRepository,
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _groupRepository = groupRepository ?? throw new ArgumentNullException(nameof(groupRepository));
+            _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<bool>> HandleAsync(RemoveWorkstationFromGroupCommand command, CancellationToken cancellationToken = default)
         {
+            var group = await _groupRepository.GetByIdAsync(command.GroupId, track: false, cancellationToken);
+            var workstation = await _workstationRepository.GetByIdAsync(command.WorkstationId, track: false, cancellationToken);
+
             await _groupRepository.RemoveMemberAsync(command.GroupId, command.WorkstationId, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (_configurationCache != null && group != null && workstation != null && workstation.OrganizationEntityId.HasValue)
+            {
+                await _configurationCache.InvalidateScopeAsync(group.OrganizationId, ConfigurationTargetType.Group, group.Id, cancellationToken);
+                await _configurationCache.InvalidateWorkstationAsync(workstation.OrganizationEntityId.Value, workstation.Id, cancellationToken);
+            }
+
             return Result<bool>.Success(true);
         }
     }
@@ -468,17 +495,20 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationTargetRepository _targetRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public AssignConfigurationToTargetCommandHandler(
             IConfigurationAssignmentRepository assignmentRepository,
             IConfigurationPackageRepository packageRepository,
             IConfigurationTargetRepository targetRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _assignmentRepository = assignmentRepository ?? throw new ArgumentNullException(nameof(assignmentRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationAssignmentDto>> HandleAsync(AssignConfigurationToTargetCommand command, CancellationToken cancellationToken = default)
@@ -510,6 +540,12 @@ namespace Sayra.Backend.Application.Configuration
                 _assignmentRepository.Update(existingAssignment);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                if (_configurationCache != null)
+                {
+                    var scopeId = ConfigurationCacheInvalidationHelper.GetScopeTargetId(target);
+                    await _configurationCache.InvalidateScopeAsync(target.OrganizationId, target.TargetType, scopeId, cancellationToken);
+                }
+
                 var reactivatedDto = new ConfigurationAssignmentDto
                 {
                     Id = existingAssignment.Id,
@@ -537,6 +573,12 @@ namespace Sayra.Backend.Application.Configuration
             await _assignmentRepository.AddAsync(assignment, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (_configurationCache != null)
+            {
+                var scopeId = ConfigurationCacheInvalidationHelper.GetScopeTargetId(target);
+                await _configurationCache.InvalidateScopeAsync(target.OrganizationId, target.TargetType, scopeId, cancellationToken);
+            }
+
             var createdDto = new ConfigurationAssignmentDto
             {
                 Id = assignment.Id,
@@ -555,14 +597,20 @@ namespace Sayra.Backend.Application.Configuration
     public class UnassignConfigurationFromTargetCommandHandler : ICommandHandler<UnassignConfigurationFromTargetCommand, bool>
     {
         private readonly IConfigurationAssignmentRepository _assignmentRepository;
+        private readonly IConfigurationTargetRepository? _targetRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public UnassignConfigurationFromTargetCommandHandler(
             IConfigurationAssignmentRepository assignmentRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationTargetRepository? targetRepository = null,
+            IConfigurationCache? configurationCache = null)
         {
             _assignmentRepository = assignmentRepository ?? throw new ArgumentNullException(nameof(assignmentRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _targetRepository = targetRepository;
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<bool>> HandleAsync(UnassignConfigurationFromTargetCommand command, CancellationToken cancellationToken = default)
@@ -578,9 +626,21 @@ namespace Sayra.Backend.Application.Configuration
                 return Result<bool>.Success(true);
             }
 
+            ConfigurationTarget? target = null;
+            if (_targetRepository != null)
+            {
+                target = await _targetRepository.GetByIdAsync(assignment.ConfigurationTargetId, track: false, cancellationToken);
+            }
+
             assignment.Unassign();
             _assignmentRepository.Update(assignment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (_configurationCache != null && target != null)
+            {
+                var scopeId = ConfigurationCacheInvalidationHelper.GetScopeTargetId(target);
+                await _configurationCache.InvalidateScopeAsync(target.OrganizationId, target.TargetType, scopeId, cancellationToken);
+            }
 
             return Result<bool>.Success(true);
         }

@@ -10,6 +10,8 @@ using Sayra.Backend.Application.Configuration.Models;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Shared;
 
+#nullable enable
+
 namespace Sayra.Backend.Application.Configuration
 {
     public class ConfigurationResolver : IConfigurationResolver
@@ -22,6 +24,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationTargetRepository _targetRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationPublicationRepository? _publicationRepository;
+        private readonly IConfigurationCache? _configurationCache;
         private readonly IConfigurationDeltaEngine _deltaEngine;
         private readonly IConfigurationNormalizer _normalizer;
         private readonly IConfigurationValidator _validator;
@@ -37,7 +40,8 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationDeltaEngine deltaEngine,
             IConfigurationNormalizer normalizer,
             IConfigurationValidator validator,
-            IConfigurationPublicationRepository? publicationRepository = null)
+            IConfigurationPublicationRepository? publicationRepository = null,
+            IConfigurationCache? configurationCache = null)
         {
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _organizationRepository = organizationRepository ?? throw new ArgumentNullException(nameof(organizationRepository));
@@ -50,6 +54,7 @@ namespace Sayra.Backend.Application.Configuration
             _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _publicationRepository = publicationRepository;
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationResolutionResult>> ResolveEffectiveConfigurationAsync(
@@ -113,183 +118,284 @@ namespace Sayra.Backend.Application.Configuration
 
             var activeGroupIds = activeGroups.Select(g => g.Id).ToList();
 
-            // 2. Retrieve Applicable Assignments
-            var assignments = await _assignmentRepository.GetApplicableAssignmentsAsync(orgId, siteId, activeGroupIds, workstation.Id, cancellationToken) ?? new List<ConfigurationAssignment>();
-            assignments = assignments.Where(a => a.IsActive).ToList();
-
-            if (!assignments.Any())
+            // Cache Lookup
+            if (_configurationCache != null)
             {
-                // Return default empty configuration normalized and validated
-                var defaultNormalized = _normalizer.NormalizeToJson("{}");
-                var defaultValidation = _validator.Validate(defaultNormalized);
-                if (!defaultValidation.IsValid)
-                {
-                    return Result<ConfigurationResolutionResult>.Failure("EffectiveConfigurationInvalid", "Default empty configuration is invalid.");
-                }
+                var cachedConfig = await _configurationCache.GetEffectiveConfigurationAsync(
+                    orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
 
-                return Result<ConfigurationResolutionResult>.Success(new ConfigurationResolutionResult
+                if (cachedConfig != null)
                 {
-                    EffectiveConfigurationJson = defaultNormalized,
-                    SchemaVersion = "1.0",
-                    AppliedSources = new List<AppliedConfigurationSourceDto>(),
-                    FieldTraces = new List<ConfigurationFieldTraceDto>(),
-                    Warnings = new List<string> { "No applicable configuration assignments found. Returning default normalized configuration." }
-                });
-            }
-
-            // 3. Load Targets, Packages, and Reconstruct Full Payloads
-            var eligibleCandidates = new List<EligibleCandidate>();
-
-            foreach (var assignment in assignments)
-            {
-                var target = await _targetRepository.GetByIdAsync(assignment.ConfigurationTargetId, track: false, cancellationToken);
-                if (target == null || target.OrganizationId != orgId)
-                {
-                    continue;
-                }
-
-                var package = await _packageRepository.GetByIdAsync(assignment.ConfigurationPackageId, track: false, cancellationToken);
-                if (package == null || !package.IsActive)
-                {
-                    // Filter out inactive/revoked packages
-                    continue;
-                }
-
-                // If Publication tracking is present, enforce Active lifecycle state requirement
-                if (_publicationRepository != null)
-                {
-                    var activePub = await _publicationRepository.GetActivePublicationForTargetAsync(target.Id, cancellationToken);
-                    if (activePub == null || activePub.ConfigurationPackageId != package.Id)
+                    var cachedResolution = new ConfigurationResolutionResult
                     {
-                        // Filter out unpublished, non-active, superseded, or revoked packages
-                        continue;
-                    }
-                }
+                        EffectiveConfigurationJson = cachedConfig.EffectiveConfigurationJson,
+                        SchemaVersion = cachedConfig.SchemaVersion,
+                        AppliedSources = cachedConfig.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
+                        FieldTraces = cachedConfig.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
+                        Warnings = cachedConfig.Warnings ?? new List<string>()
+                    };
 
-                WorkstationGroup? associatedGroup = null;
-                if (target.TargetType == ConfigurationTargetType.Group && target.GroupId.HasValue)
-                {
-                    associatedGroup = activeGroups.FirstOrDefault(g => g.Id == target.GroupId.Value);
-                    if (associatedGroup == null)
-                    {
-                        // Group is inactive or invalid
-                        continue;
-                    }
+                    return Result<ConfigurationResolutionResult>.Success(cachedResolution);
                 }
-
-                string normalizedPayload;
-                try
-                {
-                    normalizedPayload = await ReconstructPackageContentAsync(package, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    return Result<ConfigurationResolutionResult>.Failure("ConfigurationVersionUnavailable", $"Failed to reconstruct configuration package v{package.VersionNumber}: {ex.Message}");
-                }
-
-                // Ensure candidate payload is valid JSON
-                try
-                {
-                    using var _ = JsonDocument.Parse(normalizedPayload);
-                }
-                catch (Exception ex)
-                {
-                    return Result<ConfigurationResolutionResult>.Failure("TargetConfigurationInvalid", $"Candidate package v{package.VersionNumber} for target '{target.TargetType}' contains invalid JSON: {ex.Message}");
-                }
-
-                eligibleCandidates.Add(new EligibleCandidate
-                {
-                    Assignment = assignment,
-                    Target = target,
-                    Package = package,
-                    Group = associatedGroup,
-                    ReconstructedNormalizedJson = normalizedPayload
-                });
             }
 
-            if (!eligibleCandidates.Any())
+            // Stampede Lock (optional lock protection during miss)
+            IDisposable? stampedeLock = null;
+            if (_configurationCache != null)
             {
-                var defaultNormalized = _normalizer.NormalizeToJson("{}");
-                return Result<ConfigurationResolutionResult>.Success(new ConfigurationResolutionResult
-                {
-                    EffectiveConfigurationJson = defaultNormalized,
-                    SchemaVersion = "1.0",
-                    AppliedSources = new List<AppliedConfigurationSourceDto>(),
-                    FieldTraces = new List<ConfigurationFieldTraceDto>(),
-                    Warnings = new List<string> { "No active eligible configuration packages found. Returning default configuration." }
-                });
+                stampedeLock = await _configurationCache.AcquireStampedeLockAsync(orgId, workstation.Id, cancellationToken);
             }
 
-            // 4. Precedence Hierarchy & Conflict Resolution
-            // Target Precedence order: Global -> Site -> Group(s) -> Workstation
-            // Within same target scope: package.VersionNumber descending, then assignment.CreatedAt descending.
-            // Across multiple groups: Group.Code ascending (ordinal), then Group.Id ascending.
-
-            var orderedLayers = selectOrderedCandidateLayers(eligibleCandidates);
-
-            // 5. JSON Field-Level Merging
-            var rootResultObject = new JsonObject();
-            var fieldTraces = new Dictionary<string, ConfigurationFieldTraceDto>(StringComparer.Ordinal);
-            var appliedSources = new List<AppliedConfigurationSourceDto>();
-
-            foreach (var candidate in orderedLayers)
-            {
-                appliedSources.Add(new AppliedConfigurationSourceDto
-                {
-                    TargetType = candidate.Target.TargetType.ToString(),
-                    TargetId = candidate.Target.Id,
-                    PackageId = candidate.Package.Id,
-                    PackageName = candidate.Package.Name,
-                    VersionNumber = candidate.Package.VersionNumber,
-                    Version = candidate.Package.Version,
-                    AssignmentId = candidate.Assignment.Id
-                });
-
-                JsonNode? candidateNode;
-                try
-                {
-                    candidateNode = JsonNode.Parse(candidate.ReconstructedNormalizedJson);
-                }
-                catch (Exception ex)
-                {
-                    return Result<ConfigurationResolutionResult>.Failure("ConfigurationMergeFailed", $"Failed to parse JSON for candidate v{candidate.Package.VersionNumber}: {ex.Message}");
-                }
-
-                if (candidateNode is JsonObject candidateObj)
-                {
-                    MergeObjects(rootResultObject, candidateObj, string.Empty, candidate, fieldTraces);
-                }
-            }
-
-            // 6. Post-Merge Pipeline: Normalization & Validation
-            string mergedRawJson = rootResultObject.ToJsonString();
-            string mergedNormalizedJson;
             try
             {
-                mergedNormalizedJson = _normalizer.NormalizeToJson(mergedRawJson);
-            }
-            catch (Exception ex)
-            {
-                return Result<ConfigurationResolutionResult>.Failure("ConfigurationMergeFailed", $"Failed to normalize merged effective configuration: {ex.Message}");
-            }
+                // Double-check cache if lock was acquired
+                if (_configurationCache != null && stampedeLock != null)
+                {
+                    var secondCached = await _configurationCache.GetEffectiveConfigurationAsync(
+                        orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
 
-            var finalValidation = _validator.Validate(mergedNormalizedJson);
-            if (!finalValidation.IsValid)
-            {
-                var errors = string.Join("; ", finalValidation.Errors.Select(e => $"[{e.Path}] {e.Code}: {e.Message}"));
-                return Result<ConfigurationResolutionResult>.Failure("EffectiveConfigurationInvalid", $"Effective configuration post-merge validation failed: {errors}");
+                    if (secondCached != null)
+                    {
+                        var cachedResolution = new ConfigurationResolutionResult
+                        {
+                            EffectiveConfigurationJson = secondCached.EffectiveConfigurationJson,
+                            SchemaVersion = secondCached.SchemaVersion,
+                            AppliedSources = secondCached.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
+                            FieldTraces = secondCached.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
+                            Warnings = secondCached.Warnings ?? new List<string>()
+                        };
+
+                        return Result<ConfigurationResolutionResult>.Success(cachedResolution);
+                    }
+                }
+
+                // 2. Retrieve Applicable Assignments
+                var assignments = await _assignmentRepository.GetApplicableAssignmentsAsync(orgId, siteId, activeGroupIds, workstation.Id, cancellationToken) ?? new List<ConfigurationAssignment>();
+                assignments = assignments.Where(a => a.IsActive).ToList();
+
+                if (!assignments.Any())
+                {
+                    // Return default empty configuration normalized and validated
+                    var defaultNormalized = _normalizer.NormalizeToJson("{}");
+                    var defaultValidation = _validator.Validate(defaultNormalized);
+                    if (!defaultValidation.IsValid)
+                    {
+                        return Result<ConfigurationResolutionResult>.Failure("EffectiveConfigurationInvalid", "Default empty configuration is invalid.");
+                    }
+
+                    var emptyResult = new ConfigurationResolutionResult
+                    {
+                        EffectiveConfigurationJson = defaultNormalized,
+                        SchemaVersion = "1.0",
+                        AppliedSources = new List<AppliedConfigurationSourceDto>(),
+                        FieldTraces = new List<ConfigurationFieldTraceDto>(),
+                        Warnings = new List<string> { "No applicable configuration assignments found. Returning default normalized configuration." }
+                    };
+
+                    if (_configurationCache != null)
+                    {
+                        await _configurationCache.SetEffectiveConfigurationAsync(
+                            orgId, workstation.Id, siteId, activeGroupIds,
+                            new CachedEffectiveConfiguration
+                            {
+                                SchemaVersion = emptyResult.SchemaVersion,
+                                EffectiveConfigurationJson = emptyResult.EffectiveConfigurationJson,
+                                AppliedSources = emptyResult.AppliedSources,
+                                FieldTraces = emptyResult.FieldTraces,
+                                Warnings = emptyResult.Warnings
+                            },
+                            cancellationToken);
+                    }
+
+                    return Result<ConfigurationResolutionResult>.Success(emptyResult);
+                }
+
+                // 3. Load Targets, Packages, and Reconstruct Full Payloads
+                var eligibleCandidates = new List<EligibleCandidate>();
+
+                foreach (var assignment in assignments)
+                {
+                    var target = await _targetRepository.GetByIdAsync(assignment.ConfigurationTargetId, track: false, cancellationToken);
+                    if (target == null || target.OrganizationId != orgId)
+                    {
+                        continue;
+                    }
+
+                    var package = await _packageRepository.GetByIdAsync(assignment.ConfigurationPackageId, track: false, cancellationToken);
+                    if (package == null || !package.IsActive)
+                    {
+                        // Filter out inactive/revoked packages
+                        continue;
+                    }
+
+                    // If Publication tracking is present, enforce Active lifecycle state requirement
+                    if (_publicationRepository != null)
+                    {
+                        var activePub = await _publicationRepository.GetActivePublicationForTargetAsync(target.Id, cancellationToken);
+                        if (activePub == null || activePub.ConfigurationPackageId != package.Id)
+                        {
+                            // Filter out unpublished, non-active, superseded, or revoked packages
+                            continue;
+                        }
+                    }
+
+                    WorkstationGroup? associatedGroup = null;
+                    if (target.TargetType == ConfigurationTargetType.Group && target.GroupId.HasValue)
+                    {
+                        associatedGroup = activeGroups.FirstOrDefault(g => g.Id == target.GroupId.Value);
+                        if (associatedGroup == null)
+                        {
+                            // Group is inactive or invalid
+                            continue;
+                        }
+                    }
+
+                    string normalizedPayload;
+                    try
+                    {
+                        normalizedPayload = await ReconstructPackageContentAsync(package, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Result<ConfigurationResolutionResult>.Failure("ConfigurationVersionUnavailable", $"Failed to reconstruct configuration package v{package.VersionNumber}: {ex.Message}");
+                    }
+
+                    // Ensure candidate payload is valid JSON
+                    try
+                    {
+                        using var _ = JsonDocument.Parse(normalizedPayload);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Result<ConfigurationResolutionResult>.Failure("TargetConfigurationInvalid", $"Candidate package v{package.VersionNumber} for target '{target.TargetType}' contains invalid JSON: {ex.Message}");
+                    }
+
+                    eligibleCandidates.Add(new EligibleCandidate
+                    {
+                        Assignment = assignment,
+                        Target = target,
+                        Package = package,
+                        Group = associatedGroup,
+                        ReconstructedNormalizedJson = normalizedPayload
+                    });
+                }
+
+                if (!eligibleCandidates.Any())
+                {
+                    var defaultNormalized = _normalizer.NormalizeToJson("{}");
+                    var emptyResult = new ConfigurationResolutionResult
+                    {
+                        EffectiveConfigurationJson = defaultNormalized,
+                        SchemaVersion = "1.0",
+                        AppliedSources = new List<AppliedConfigurationSourceDto>(),
+                        FieldTraces = new List<ConfigurationFieldTraceDto>(),
+                        Warnings = new List<string> { "No active eligible configuration packages found. Returning default configuration." }
+                    };
+
+                    if (_configurationCache != null)
+                    {
+                        await _configurationCache.SetEffectiveConfigurationAsync(
+                            orgId, workstation.Id, siteId, activeGroupIds,
+                            new CachedEffectiveConfiguration
+                            {
+                                SchemaVersion = emptyResult.SchemaVersion,
+                                EffectiveConfigurationJson = emptyResult.EffectiveConfigurationJson,
+                                AppliedSources = emptyResult.AppliedSources,
+                                FieldTraces = emptyResult.FieldTraces,
+                                Warnings = emptyResult.Warnings
+                            },
+                            cancellationToken);
+                    }
+
+                    return Result<ConfigurationResolutionResult>.Success(emptyResult);
+                }
+
+                // 4. Precedence Hierarchy & Conflict Resolution
+                var orderedLayers = selectOrderedCandidateLayers(eligibleCandidates);
+
+                // 5. JSON Field-Level Merging
+                var rootResultObject = new JsonObject();
+                var fieldTraces = new Dictionary<string, ConfigurationFieldTraceDto>(StringComparer.Ordinal);
+                var appliedSources = new List<AppliedConfigurationSourceDto>();
+
+                foreach (var candidate in orderedLayers)
+                {
+                    appliedSources.Add(new AppliedConfigurationSourceDto
+                    {
+                        TargetType = candidate.Target.TargetType.ToString(),
+                        TargetId = candidate.Target.Id,
+                        PackageId = candidate.Package.Id,
+                        PackageName = candidate.Package.Name,
+                        VersionNumber = candidate.Package.VersionNumber,
+                        Version = candidate.Package.Version,
+                        AssignmentId = candidate.Assignment.Id
+                    });
+
+                    JsonNode? candidateNode;
+                    try
+                    {
+                        candidateNode = JsonNode.Parse(candidate.ReconstructedNormalizedJson);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Result<ConfigurationResolutionResult>.Failure("ConfigurationMergeFailed", $"Failed to parse JSON for candidate v{candidate.Package.VersionNumber}: {ex.Message}");
+                    }
+
+                    if (candidateNode is JsonObject candidateObj)
+                    {
+                        MergeObjects(rootResultObject, candidateObj, string.Empty, candidate, fieldTraces);
+                    }
+                }
+
+                // 6. Post-Merge Pipeline: Normalization & Validation
+                string mergedRawJson = rootResultObject.ToJsonString();
+                string mergedNormalizedJson;
+                try
+                {
+                    mergedNormalizedJson = _normalizer.NormalizeToJson(mergedRawJson);
+                }
+                catch (Exception ex)
+                {
+                    return Result<ConfigurationResolutionResult>.Failure("ConfigurationMergeFailed", $"Failed to normalize merged effective configuration: {ex.Message}");
+                }
+
+                var finalValidation = _validator.Validate(mergedNormalizedJson);
+                if (!finalValidation.IsValid)
+                {
+                    var errors = string.Join("; ", finalValidation.Errors.Select(e => $"[{e.Path}] {e.Code}: {e.Message}"));
+                    return Result<ConfigurationResolutionResult>.Failure("EffectiveConfigurationInvalid", $"Effective configuration post-merge validation failed: {errors}");
+                }
+
+                var result = new ConfigurationResolutionResult
+                {
+                    EffectiveConfigurationJson = mergedNormalizedJson,
+                    SchemaVersion = eligibleCandidates.Select(c => c.Package.SchemaVersion).FirstOrDefault() ?? "1.0",
+                    AppliedSources = appliedSources,
+                    FieldTraces = fieldTraces.Values.OrderBy(f => f.Path, StringComparer.Ordinal).ToList(),
+                    Warnings = new List<string>()
+                };
+
+                if (_configurationCache != null)
+                {
+                    await _configurationCache.SetEffectiveConfigurationAsync(
+                        orgId, workstation.Id, siteId, activeGroupIds,
+                        new CachedEffectiveConfiguration
+                        {
+                            SchemaVersion = result.SchemaVersion,
+                            EffectiveConfigurationJson = result.EffectiveConfigurationJson,
+                            AppliedSources = result.AppliedSources,
+                            FieldTraces = result.FieldTraces,
+                            Warnings = result.Warnings
+                        },
+                        cancellationToken);
+                }
+
+                return Result<ConfigurationResolutionResult>.Success(result);
             }
-
-            var result = new ConfigurationResolutionResult
+            finally
             {
-                EffectiveConfigurationJson = mergedNormalizedJson,
-                SchemaVersion = eligibleCandidates.Select(c => c.Package.SchemaVersion).FirstOrDefault() ?? "1.0",
-                AppliedSources = appliedSources,
-                FieldTraces = fieldTraces.Values.OrderBy(f => f.Path, StringComparer.Ordinal).ToList(),
-                Warnings = new List<string>()
-            };
-
-            return Result<ConfigurationResolutionResult>.Success(result);
+                stampedeLock?.Dispose();
+            }
         }
 
         private async Task<string> ReconstructPackageContentAsync(ConfigurationPackage package, CancellationToken cancellationToken)
