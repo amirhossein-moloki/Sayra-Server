@@ -1,5 +1,7 @@
 using System;
 
+#nullable enable
+
 namespace Sayra.Backend.Domain
 {
     public enum ConfigurationPayloadType
@@ -19,6 +21,12 @@ namespace Sayra.Backend.Domain
         public string Content { get; private set; } = "{}"; // Normalized JSON or Delta JSON
         public bool IsActive { get; set; }
         public string IssuedBy { get; private set; } = "system";
+
+        // Cryptographic Integrity Metadata
+        public string? ConfigurationHash { get; private set; }
+        public string? Signature { get; private set; }
+        public string? SignatureAlgorithm { get; private set; }
+        public string? SigningKeyId { get; private set; }
 
         // Optimistic Concurrency Token
         public uint RowVersion { get; set; }
@@ -113,6 +121,39 @@ namespace Sayra.Backend.Domain
                 IssuedBy = string.IsNullOrWhiteSpace(issuedBy) ? "system" : issuedBy.Trim(),
                 CreatedAt = DateTime.UtcNow
             };
+        }
+
+        public void SetCryptographicSignature(string hash, string signature, string algorithm, string signingKeyId)
+        {
+            if (!string.IsNullOrWhiteSpace(Signature))
+            {
+                throw new InvalidOperationException($"Configuration package v{VersionNumber} is already signed and cannot be re-signed or modified.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hash))
+            {
+                throw new ArgumentException("Configuration hash cannot be null or empty.", nameof(hash));
+            }
+
+            if (string.IsNullOrWhiteSpace(signature))
+            {
+                throw new ArgumentException("Signature cannot be null or empty.", nameof(signature));
+            }
+
+            if (string.IsNullOrWhiteSpace(algorithm))
+            {
+                throw new ArgumentException("Signature algorithm cannot be null or empty.", nameof(algorithm));
+            }
+
+            if (string.IsNullOrWhiteSpace(signingKeyId))
+            {
+                throw new ArgumentException("Signing key ID cannot be null or empty.", nameof(signingKeyId));
+            }
+
+            ConfigurationHash = hash.Trim().ToLowerInvariant();
+            Signature = signature.Trim();
+            SignatureAlgorithm = algorithm.Trim();
+            SigningKeyId = signingKeyId.Trim();
         }
     }
 }

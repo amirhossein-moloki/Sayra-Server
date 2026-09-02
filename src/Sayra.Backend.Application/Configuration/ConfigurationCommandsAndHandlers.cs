@@ -103,18 +103,21 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPackageRepository _repository;
         private readonly IConfigurationNormalizer _normalizer;
         private readonly IConfigurationValidator _validator;
+        private readonly IConfigurationSigningService? _signingService;
         private readonly IUnitOfWork _unitOfWork;
 
         public CreateFullConfigurationVersionCommandHandler(
             IConfigurationPackageRepository repository,
             IConfigurationNormalizer normalizer,
             IConfigurationValidator validator,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationSigningService? signingService = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _signingService = signingService;
         }
 
         public async Task<Result<ConfigurationPackage>> HandleAsync(CreateFullConfigurationVersionCommand command, CancellationToken cancellationToken = default)
@@ -156,6 +159,19 @@ namespace Sayra.Backend.Application.Configuration
                     schemaVersion: command.SchemaVersion,
                     issuedBy: command.IssuedBy);
 
+                if (_signingService != null)
+                {
+                    try
+                    {
+                        var signResult = await _signingService.SignPackageAsync(normalizedJson, cancellationToken: cancellationToken);
+                        package.SetCryptographicSignature(signResult.Hash, signResult.Signature, signResult.Algorithm, signResult.KeyId);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Result.Failure<ConfigurationPackage>("ConfigurationSigningFailed", $"Failed to digitally sign configuration package: {ex.Message}");
+                    }
+                }
+
                 await _repository.AddAsync(package, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -176,6 +192,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPackageRepository _repository;
         private readonly IConfigurationDeltaEngine _deltaEngine;
         private readonly IConfigurationValidator _validator;
+        private readonly IConfigurationSigningService? _signingService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ReconstructConfigurationCommandHandler _reconstructHandler;
 
@@ -183,12 +200,14 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPackageRepository repository,
             IConfigurationDeltaEngine deltaEngine,
             IConfigurationValidator validator,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationSigningService? signingService = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _deltaEngine = deltaEngine ?? throw new ArgumentNullException(nameof(deltaEngine));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _signingService = signingService;
             _reconstructHandler = new ReconstructConfigurationCommandHandler(repository, deltaEngine);
         }
 
@@ -243,6 +262,19 @@ namespace Sayra.Backend.Application.Configuration
                     content: command.RawPayload,
                     schemaVersion: command.SchemaVersion,
                     issuedBy: command.IssuedBy);
+
+                if (_signingService != null)
+                {
+                    try
+                    {
+                        var signResult = await _signingService.SignPackageAsync(command.RawPayload, cancellationToken: cancellationToken);
+                        package.SetCryptographicSignature(signResult.Hash, signResult.Signature, signResult.Algorithm, signResult.KeyId);
+                    }
+                    catch (Exception ex)
+                    {
+                        return Result.Failure<ConfigurationPackage>("ConfigurationSigningFailed", $"Failed to digitally sign delta configuration package: {ex.Message}");
+                    }
+                }
 
                 await _repository.AddAsync(package, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
