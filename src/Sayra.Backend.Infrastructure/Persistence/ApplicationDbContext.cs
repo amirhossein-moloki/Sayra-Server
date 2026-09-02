@@ -51,6 +51,10 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<LoginAttempt> LoginAttempts { get; set; } = null!;
         public DbSet<CommunicationSession> CommunicationSessions { get; set; } = null!;
         public DbSet<RemoteCommand> RemoteCommands { get; set; } = null!;
+        public DbSet<WorkstationGroup> WorkstationGroups { get; set; } = null!;
+        public DbSet<WorkstationGroupMember> WorkstationGroupMembers { get; set; } = null!;
+        public DbSet<ConfigurationTarget> ConfigurationTargets { get; set; } = null!;
+        public DbSet<ConfigurationAssignment> ConfigurationAssignments { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
