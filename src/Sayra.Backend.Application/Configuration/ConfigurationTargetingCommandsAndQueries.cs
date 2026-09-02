@@ -112,6 +112,11 @@ namespace Sayra.Backend.Application.Configuration
         public Guid WorkstationId { get; set; }
     }
 
+    public class ResolveEffectiveConfigurationQuery : IQuery<Models.ConfigurationResolutionResult>
+    {
+        public Guid WorkstationId { get; set; }
+    }
+
     // --- Handlers ---
 
     public class CreateWorkstationGroupCommandHandler : ICommandHandler<CreateWorkstationGroupCommand, WorkstationGroupDto>
@@ -693,6 +698,31 @@ namespace Sayra.Backend.Application.Configuration
             }
 
             return Result<List<ApplicableAssignmentDto>>.Success(resultDtos);
+        }
+    }
+
+    public class ResolveEffectiveConfigurationQueryHandler : IQueryHandler<ResolveEffectiveConfigurationQuery, Models.ConfigurationResolutionResult>
+    {
+        private readonly IConfigurationResolver _resolver;
+
+        public ResolveEffectiveConfigurationQueryHandler(IConfigurationResolver resolver)
+        {
+            _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        }
+
+        public async Task<Result<Models.ConfigurationResolutionResult>> HandleAsync(ResolveEffectiveConfigurationQuery query, CancellationToken cancellationToken = default)
+        {
+            if (query == null)
+            {
+                return Result<Models.ConfigurationResolutionResult>.Failure("NULL_QUERY", "Query cannot be null.");
+            }
+
+            if (query.WorkstationId == Guid.Empty)
+            {
+                return Result<Models.ConfigurationResolutionResult>.Failure("INVALID_WORKSTATION_ID", "WorkstationId is required.");
+            }
+
+            return await _resolver.ResolveEffectiveConfigurationAsync(query.WorkstationId, cancellationToken);
         }
     }
 }
