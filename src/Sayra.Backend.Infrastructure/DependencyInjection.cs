@@ -264,6 +264,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetConfigurationAssignmentsQuery, System.Collections.Generic.List<Sayra.Backend.Application.Configuration.ConfigurationAssignmentDto>>, Sayra.Backend.Application.Configuration.GetConfigurationAssignmentsQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQuery, System.Collections.Generic.List<Sayra.Backend.Application.Configuration.ApplicableAssignmentDto>>, Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQueryHandler>();
             services.AddScoped<Sayra.Backend.Application.Configuration.IConfigurationResolver, Sayra.Backend.Application.Configuration.ConfigurationResolver>();
+            services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationMetrics, Sayra.Backend.Infrastructure.Configuration.ConfigurationMetrics>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.ResolveEffectiveConfigurationQuery, Sayra.Backend.Application.Configuration.Models.ConfigurationResolutionResult>, Sayra.Backend.Application.Configuration.ResolveEffectiveConfigurationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.SynchronizeConfigurationQuery, Sayra.Backend.Application.Configuration.ConfigurationSyncResult>, Sayra.Backend.Application.Configuration.SynchronizeConfigurationQueryHandler>();
 

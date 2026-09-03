@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Shared;
@@ -494,6 +495,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationAssignmentRepository _assignmentRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationTargetRepository _targetRepository;
+        private readonly ISecurityEventService? _securityEventService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -502,13 +504,15 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPackageRepository packageRepository,
             IConfigurationTargetRepository targetRepository,
             IUnitOfWork unitOfWork,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null)
         {
             _assignmentRepository = assignmentRepository ?? throw new ArgumentNullException(nameof(assignmentRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
         }
 
         public async Task<Result<ConfigurationAssignmentDto>> HandleAsync(AssignConfigurationToTargetCommand command, CancellationToken cancellationToken = default)
@@ -573,6 +577,23 @@ namespace Sayra.Backend.Application.Configuration
             await _assignmentRepository.AddAsync(assignment, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (_securityEventService != null)
+            {
+                await _securityEventService.RecordSecurityEventAsync(
+                    eventType: "CONFIG_ASSIGNED",
+                    actorId: null,
+                    actorType: command.AssignedBy,
+                    deviceId: null,
+                    organizationId: target.OrganizationId,
+                    siteId: target.SiteId,
+                    resourceType: "ConfigurationAssignment",
+                    resourceId: assignment.Id,
+                    action: "ASSIGN",
+                    result: "SUCCESS",
+                    failureReason: null,
+                    cancellationToken: cancellationToken);
+            }
+
             if (_configurationCache != null)
             {
                 var scopeId = ConfigurationCacheInvalidationHelper.GetScopeTargetId(target);
@@ -598,6 +619,7 @@ namespace Sayra.Backend.Application.Configuration
     {
         private readonly IConfigurationAssignmentRepository _assignmentRepository;
         private readonly IConfigurationTargetRepository? _targetRepository;
+        private readonly ISecurityEventService? _securityEventService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -605,12 +627,14 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationAssignmentRepository assignmentRepository,
             IUnitOfWork unitOfWork,
             IConfigurationTargetRepository? targetRepository = null,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null)
         {
             _assignmentRepository = assignmentRepository ?? throw new ArgumentNullException(nameof(assignmentRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _targetRepository = targetRepository;
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
         }
 
         public async Task<Result<bool>> HandleAsync(UnassignConfigurationFromTargetCommand command, CancellationToken cancellationToken = default)
@@ -635,6 +659,23 @@ namespace Sayra.Backend.Application.Configuration
             assignment.Unassign();
             _assignmentRepository.Update(assignment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (_securityEventService != null)
+            {
+                await _securityEventService.RecordSecurityEventAsync(
+                    eventType: "CONFIG_UNASSIGNED",
+                    actorId: null,
+                    actorType: "User",
+                    deviceId: null,
+                    organizationId: target?.OrganizationId,
+                    siteId: target?.SiteId,
+                    resourceType: "ConfigurationAssignment",
+                    resourceId: assignment.Id,
+                    action: "UNASSIGN",
+                    result: "SUCCESS",
+                    failureReason: null,
+                    cancellationToken: cancellationToken);
+            }
 
             if (_configurationCache != null && target != null)
             {

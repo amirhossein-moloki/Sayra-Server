@@ -30,6 +30,16 @@ namespace Sayra.Backend.Api.Controllers
             [FromQuery] string? currentVersion,
             CancellationToken cancellationToken)
         {
+            // 0. Rate limiting / Rapid repeated sync abuse protection (HTTP 429)
+            string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            string rateKey = $"sayra:rate:config_sync:{clientIp}";
+
+            if (HttpContext.Items[rateKey] is DateTime lastSyncTime && (DateTime.UtcNow - lastSyncTime).TotalMilliseconds < 200)
+            {
+                return StatusCode(429, new { code = "RATE_LIMIT_EXCEEDED", message = "Too many configuration synchronization requests. Please retry after a delay." });
+            }
+            HttpContext.Items[rateKey] = DateTime.UtcNow;
+
             // 1. Resolve Authenticated Server-Authoritative Identity from UserPrincipalMiddleware
             var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
             if (principal == null || !principal.IsAuthenticated)
