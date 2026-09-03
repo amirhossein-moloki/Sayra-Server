@@ -265,6 +265,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQuery, System.Collections.Generic.List<Sayra.Backend.Application.Configuration.ApplicableAssignmentDto>>, Sayra.Backend.Application.Configuration.GetApplicableAssignmentsForWorkstationQueryHandler>();
             services.AddScoped<Sayra.Backend.Application.Configuration.IConfigurationResolver, Sayra.Backend.Application.Configuration.ConfigurationResolver>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.ResolveEffectiveConfigurationQuery, Sayra.Backend.Application.Configuration.Models.ConfigurationResolutionResult>, Sayra.Backend.Application.Configuration.ResolveEffectiveConfigurationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Configuration.SynchronizeConfigurationQuery, Sayra.Backend.Application.Configuration.ConfigurationSyncResult>, Sayra.Backend.Application.Configuration.SynchronizeConfigurationQueryHandler>();
 
             // Phase 05 Communication Session Foundation Services & Handlers
             services.AddScoped<Sayra.Backend.Application.Abstractions.Communication.ICommunicationSessionRepository, CommunicationSessionRepository>();
