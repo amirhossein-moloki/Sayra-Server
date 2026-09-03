@@ -80,6 +80,35 @@ namespace Sayra.Backend.Application.Configuration
     }
 
     // -------------------------------------------------------------------
+    // Helper
+    // -------------------------------------------------------------------
+    internal static class ConfigurationCacheInvalidationHelper
+    {
+        public static Guid? GetScopeTargetId(ConfigurationTarget target)
+        {
+            return target.TargetType switch
+            {
+                ConfigurationTargetType.Global => null,
+                ConfigurationTargetType.Site => target.SiteId,
+                ConfigurationTargetType.Group => target.GroupId,
+                ConfigurationTargetType.Workstation => target.WorkstationId,
+                _ => null
+            };
+        }
+
+        public static async Task InvalidateTargetCacheAsync(
+            IConfigurationCache? cache,
+            ConfigurationTarget target,
+            CancellationToken cancellationToken)
+        {
+            if (cache == null) return;
+            var scopeId = GetScopeTargetId(target);
+            await cache.InvalidateScopeAsync(target.OrganizationId, target.TargetType, scopeId, cancellationToken);
+            await cache.InvalidatePublicationMetadataAsync(target.OrganizationId, target.Id, cancellationToken);
+        }
+    }
+
+    // -------------------------------------------------------------------
     // 1. Prepare / Create Publication Command
     // -------------------------------------------------------------------
     public record PreparePublicationCommand(
@@ -99,6 +128,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationSigningService _signingService;
         private readonly IConfigurationValidator _validator;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public PreparePublicationCommandHandler(
             IConfigurationPackageRepository packageRepository,
@@ -107,7 +137,8 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPublicationRepository publicationRepository,
             IConfigurationSigningService signingService,
             IConfigurationValidator validator,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
@@ -116,6 +147,7 @@ namespace Sayra.Backend.Application.Configuration
             _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(PreparePublicationCommand command, CancellationToken cancellationToken = default)
@@ -197,6 +229,8 @@ namespace Sayra.Backend.Application.Configuration
             await _publicationRepository.AddAsync(publication, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, target, cancellationToken);
+
             return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
         }
     }
@@ -221,6 +255,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationSigningService _signingService;
         private readonly IConfigurationValidator _validator;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public PublishConfigurationCommandHandler(
             IConfigurationPackageRepository packageRepository,
@@ -229,7 +264,8 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPublicationRepository publicationRepository,
             IConfigurationSigningService signingService,
             IConfigurationValidator validator,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
@@ -238,6 +274,7 @@ namespace Sayra.Backend.Application.Configuration
             _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(PublishConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -253,7 +290,7 @@ namespace Sayra.Backend.Application.Configuration
                 }
             }
 
-            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
+            var result = await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 var package = await _packageRepository.GetByIdAsync(command.ConfigurationPackageId, track: false, cancellationToken);
                 if (package == null)
@@ -339,6 +376,17 @@ namespace Sayra.Backend.Application.Configuration
 
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
+
+            if (result.IsSuccess)
+            {
+                var target = await _targetRepository.GetByIdAsync(command.ConfigurationTargetId, track: false, cancellationToken);
+                if (target != null)
+                {
+                    await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, target, cancellationToken);
+                }
+            }
+
+            return result;
         }
     }
 
@@ -353,31 +401,44 @@ namespace Sayra.Backend.Application.Configuration
     {
         private readonly IConfigurationPublicationRepository _publicationRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
+        private readonly IConfigurationTargetRepository? _targetRepository;
         private readonly IConfigurationSigningService _signingService;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public ActivateConfigurationCommandHandler(
             IConfigurationPublicationRepository publicationRepository,
             IConfigurationPackageRepository packageRepository,
             IConfigurationSigningService signingService,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationTargetRepository? targetRepository = null,
+            IConfigurationCache? configurationCache = null)
         {
             _publicationRepository = publicationRepository ?? throw new ArgumentNullException(nameof(publicationRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _targetRepository = targetRepository;
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(ActivateConfigurationCommand command, CancellationToken cancellationToken = default)
         {
             if (command == null) return Result.Failure<ConfigurationPublicationDto>("NULL_COMMAND", "Command cannot be null.");
 
-            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
+            ConfigurationTarget? affectedTarget = null;
+
+            var result = await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 var publication = await _publicationRepository.GetByIdAsync(command.PublicationId, track: true, cancellationToken);
                 if (publication == null)
                 {
                     return Result.Failure<ConfigurationPublicationDto>("ConfigurationNotFound", $"Publication '{command.PublicationId}' not found.");
+                }
+
+                if (_targetRepository != null)
+                {
+                    affectedTarget = await _targetRepository.GetByIdAsync(publication.ConfigurationTargetId, track: false, cancellationToken);
                 }
 
                 if (publication.Status == ConfigurationLifecycleState.Active)
@@ -431,6 +492,13 @@ namespace Sayra.Backend.Application.Configuration
 
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
+
+            if (result.IsSuccess && affectedTarget != null)
+            {
+                await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, affectedTarget, cancellationToken);
+            }
+
+            return result;
         }
     }
 
@@ -446,16 +514,22 @@ namespace Sayra.Backend.Application.Configuration
     {
         private readonly IConfigurationPublicationRepository _publicationRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
+        private readonly IConfigurationTargetRepository? _targetRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfigurationCache? _configurationCache;
 
         public RevokeConfigurationCommandHandler(
             IConfigurationPublicationRepository publicationRepository,
             IConfigurationPackageRepository packageRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationTargetRepository? targetRepository = null,
+            IConfigurationCache? configurationCache = null)
         {
             _publicationRepository = publicationRepository ?? throw new ArgumentNullException(nameof(publicationRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _targetRepository = targetRepository;
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(RevokeConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -463,12 +537,19 @@ namespace Sayra.Backend.Application.Configuration
             if (command == null) return Result.Failure<ConfigurationPublicationDto>("NULL_COMMAND", "Command cannot be null.");
             if (string.IsNullOrWhiteSpace(command.Reason)) return Result.Failure<ConfigurationPublicationDto>("REVOCATION_REASON_REQUIRED", "Revocation reason is required.");
 
-            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
+            ConfigurationTarget? affectedTarget = null;
+
+            var result = await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 var publication = await _publicationRepository.GetByIdAsync(command.PublicationId, track: true, cancellationToken);
                 if (publication == null)
                 {
                     return Result.Failure<ConfigurationPublicationDto>("ConfigurationNotFound", $"Publication '{command.PublicationId}' not found.");
+                }
+
+                if (_targetRepository != null)
+                {
+                    affectedTarget = await _targetRepository.GetByIdAsync(publication.ConfigurationTargetId, track: false, cancellationToken);
                 }
 
                 if (publication.Status == ConfigurationLifecycleState.Revoked)
@@ -489,6 +570,13 @@ namespace Sayra.Backend.Application.Configuration
 
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
+
+            if (result.IsSuccess && affectedTarget != null)
+            {
+                await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, affectedTarget, cancellationToken);
+            }
+
+            return result;
         }
     }
 
@@ -516,6 +604,7 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationDeltaEngine _deltaEngine;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ReconstructConfigurationCommandHandler _reconstructHandler;
+        private readonly IConfigurationCache? _configurationCache;
 
         public RollbackConfigurationCommandHandler(
             IConfigurationTargetRepository targetRepository,
@@ -525,7 +614,8 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationSigningService signingService,
             IConfigurationValidator validator,
             IConfigurationDeltaEngine deltaEngine,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfigurationCache? configurationCache = null)
         {
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
@@ -536,6 +626,7 @@ namespace Sayra.Backend.Application.Configuration
             _deltaEngine = deltaEngine ?? throw new ArgumentNullException(nameof(deltaEngine));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _reconstructHandler = new ReconstructConfigurationCommandHandler(packageRepository, deltaEngine);
+            _configurationCache = configurationCache;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(RollbackConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -551,13 +642,17 @@ namespace Sayra.Backend.Application.Configuration
                 }
             }
 
-            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
+            ConfigurationTarget? affectedTarget = null;
+
+            var result = await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 var target = await _targetRepository.GetByIdAsync(command.ConfigurationTargetId, track: false, cancellationToken);
                 if (target == null)
                 {
                     return Result.Failure<ConfigurationPublicationDto>("RollbackTargetInvalid", $"Target '{command.ConfigurationTargetId}' not found.");
                 }
+
+                affectedTarget = target;
 
                 var currentActivePub = await _publicationRepository.GetActivePublicationForTargetAsync(target.Id, cancellationToken);
                 long failedVerNumber = command.FailedVersionNumber ?? currentActivePub?.VersionNumber ?? 0;
@@ -656,6 +751,13 @@ namespace Sayra.Backend.Application.Configuration
 
                 return Result.Success(ConfigurationPublicationDto.FromDomain(rollbackPublication));
             }, cancellationToken);
+
+            if (result.IsSuccess && affectedTarget != null)
+            {
+                await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, affectedTarget, cancellationToken);
+            }
+
+            return result;
         }
     }
 
