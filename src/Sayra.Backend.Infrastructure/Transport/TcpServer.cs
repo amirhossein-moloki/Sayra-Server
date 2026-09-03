@@ -23,6 +23,7 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 
@@ -387,10 +388,8 @@ namespace Sayra.Backend.Infrastructure.Transport
             Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope? envelope;
             try
             {
-                envelope = JsonSerializer.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(frame, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                // Re-use cached ProtocolSerialization.Options to eliminate per-frame JsonSerializerOptions allocation
+                envelope = ProtocolSerialization.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(frame);
             }
             catch (JsonException ex)
             {
@@ -520,10 +519,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 telemElem = tProp;
                             }
 
-                            var model = JsonSerializer.Deserialize<Sayra.Backend.Contracts.TelemetryModel>(telemElem.GetRawText(), new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            });
+                            // Deserializing directly from JsonElement avoids intermediate string allocation from GetRawText()
+                            // and uses cached ProtocolSerialization.Options to prevent per-call reflection metadata rebuilds.
+                            var model = telemElem.Deserialize<Sayra.Backend.Contracts.TelemetryModel>(ProtocolSerialization.Options);
 
                             if (model != null)
                             {
@@ -560,10 +558,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 evtElem = eProp;
                             }
 
-                            var evtDto = JsonSerializer.Deserialize<Sayra.Backend.Contracts.ClientEventEnvelopeDto>(evtElem.GetRawText(), new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            });
+                            // Deserializing directly from JsonElement avoids intermediate string allocation from GetRawText()
+                            // and uses cached ProtocolSerialization.Options to prevent per-call reflection metadata rebuilds.
+                            var evtDto = evtElem.Deserialize<Sayra.Backend.Contracts.ClientEventEnvelopeDto>(ProtocolSerialization.Options);
 
                             if (evtDto != null)
                             {
@@ -617,10 +614,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                         {
                             if (root.TryGetProperty("payload", out var payloadProp))
                             {
-                                var commandPayload = JsonSerializer.Deserialize<Sayra.Backend.Contracts.SessionCommandPayload>(payloadProp.GetRawText(), new JsonSerializerOptions
-                                {
-                                    PropertyNameCaseInsensitive = true
-                                });
+                                // Deserializing directly from JsonElement avoids intermediate string allocation from GetRawText()
+                                // and uses cached ProtocolSerialization.Options to prevent per-call reflection metadata rebuilds.
+                                var commandPayload = payloadProp.Deserialize<Sayra.Backend.Contracts.SessionCommandPayload>(ProtocolSerialization.Options);
 
                                 if (commandPayload != null && !string.IsNullOrEmpty(commandPayload.Action))
                                 {
