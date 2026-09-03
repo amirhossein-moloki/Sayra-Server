@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Configuration.Models;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
@@ -56,6 +57,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly ICanonicalConfigurationSerializer _canonicalSerializer;
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationDeltaEngine _deltaEngine;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly ILogger<SynchronizeConfigurationQueryHandler> _logger;
 
         public SynchronizeConfigurationQueryHandler(
@@ -66,7 +69,9 @@ namespace Sayra.Backend.Application.Configuration
             ICanonicalConfigurationSerializer canonicalSerializer,
             IConfigurationPackageRepository packageRepository,
             IConfigurationDeltaEngine deltaEngine,
-            ILogger<SynchronizeConfigurationQueryHandler> logger)
+            ILogger<SynchronizeConfigurationQueryHandler> logger,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
@@ -76,6 +81,8 @@ namespace Sayra.Backend.Application.Configuration
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _deltaEngine = deltaEngine ?? throw new ArgumentNullException(nameof(deltaEngine));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationSyncResult>> HandleAsync(SynchronizeConfigurationQuery query, CancellationToken cancellationToken = default)
@@ -84,6 +91,10 @@ namespace Sayra.Backend.Application.Configuration
             {
                 return Result.Failure<ConfigurationSyncResult>("NULL_QUERY", "Query cannot be null.");
             }
+
+            using var activity = _metrics?.StartActivity("ConfigurationSync");
+            activity?.SetTag("client.pcid", query.ClientPcId);
+            activity?.SetTag("client.version", query.ClientVersion);
 
             // 1. Resolve Workstation Identity
             Workstation? workstation = null;
@@ -101,12 +112,30 @@ namespace Sayra.Backend.Application.Configuration
             if (workstation == null)
             {
                 _logger.LogWarning("Configuration sync failed: Workstation identity not found for PcId '{PcId}', Id '{WorkstationId}'", query.ClientPcId, query.WorkstationId);
+                _metrics?.RecordSyncRequest("failure", "none", "WORKSTATION_NOT_FOUND");
                 return Result.Failure<ConfigurationSyncResult>("WORKSTATION_NOT_FOUND", "Workstation entity not found for the authenticated session.");
             }
 
             if (workstation.IsDisabled || workstation.IsDeactivated)
             {
                 _logger.LogWarning("Configuration sync rejected: Workstation '{PcId}' is disabled or deactivated.", workstation.PcId);
+                _metrics?.RecordSecurityDenied("sync", "WORKSTATION_DISABLED");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_ACCESS_DENIED",
+                        actorId: null,
+                        actorType: "Workstation",
+                        deviceId: workstation.PcId,
+                        organizationId: workstation.OrganizationEntityId,
+                        siteId: workstation.SiteEntityId,
+                        resourceType: "Workstation",
+                        resourceId: workstation.Id,
+                        action: "SYNC",
+                        result: "DENIED",
+                        failureReason: "Workstation is disabled or deactivated.",
+                        cancellationToken: cancellationToken);
+                }
                 return Result.Failure<ConfigurationSyncResult>("WORKSTATION_DISABLED", $"Workstation '{workstation.PcId}' is disabled or deactivated.");
             }
 
@@ -115,6 +144,23 @@ namespace Sayra.Backend.Application.Configuration
             {
                 _logger.LogWarning("Configuration sync rejected: Cross-organization access attempt by PcId '{PcId}' in Org '{WorkstationOrg}' for Org '{RequestedOrg}'",
                     workstation.PcId, workstation.OrganizationEntityId, query.OrganizationId);
+                _metrics?.RecordSecurityDenied("sync", "CROSS_ORGANIZATION_ACCESS_DENIED");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_SECURITY_VIOLATION",
+                        actorId: null,
+                        actorType: "Workstation",
+                        deviceId: workstation.PcId,
+                        organizationId: query.OrganizationId,
+                        siteId: workstation.SiteEntityId,
+                        resourceType: "Organization",
+                        resourceId: query.OrganizationId,
+                        action: "SYNC",
+                        result: "DENIED",
+                        failureReason: "Cross-organization configuration sync attempt.",
+                        cancellationToken: cancellationToken);
+                }
                 return Result.Failure<ConfigurationSyncResult>("CROSS_ORGANIZATION_ACCESS_DENIED", "Access denied: Workstation does not belong to the requested organization.");
             }
 
@@ -165,6 +211,24 @@ namespace Sayra.Backend.Application.Configuration
                 _logger.LogInformation("Configuration sync complete for Workstation '{PcId}': Status=UpToDate, Version=v{Version}",
                     workstation.PcId, authoritativeVersionNumber);
 
+                _metrics?.RecordSyncRequest("not_modified", "Full");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_SYNCED",
+                        actorId: null,
+                        actorType: "Workstation",
+                        deviceId: workstation.PcId,
+                        organizationId: workstation.OrganizationEntityId,
+                        siteId: workstation.SiteEntityId,
+                        resourceType: "WorkstationConfiguration",
+                        resourceId: workstation.Id,
+                        action: "SYNC",
+                        result: "NOT_MODIFIED",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+                }
+
                 return Result.Success(new ConfigurationSyncResult
                 {
                     Status = ConfigurationSyncStatus.UpToDate,
@@ -199,6 +263,24 @@ namespace Sayra.Backend.Application.Configuration
                     _logger.LogInformation("Configuration sync complete for Workstation '{PcId}': Status=DeltaPackage, BaseVersion=v{BaseVersion}, TargetVersion=v{TargetVersion}",
                         workstation.PcId, clientVersion.Value, authoritativeVersionNumber);
 
+                    _metrics?.RecordSyncRequest("success", "Delta");
+                    if (_securityEventService != null)
+                    {
+                        await _securityEventService.RecordSecurityEventAsync(
+                            eventType: "CONFIG_SYNCED",
+                            actorId: null,
+                            actorType: "Workstation",
+                            deviceId: workstation.PcId,
+                            organizationId: workstation.OrganizationEntityId,
+                            siteId: workstation.SiteEntityId,
+                            resourceType: "WorkstationConfiguration",
+                            resourceId: workstation.Id,
+                            action: "SYNC_DELTA",
+                            result: "SUCCESS",
+                            failureReason: null,
+                            cancellationToken: cancellationToken);
+                    }
+
                     return Result.Success(deltaResult);
                 }
 
@@ -220,6 +302,24 @@ namespace Sayra.Backend.Application.Configuration
 
             _logger.LogInformation("Configuration sync complete for Workstation '{PcId}': Status=FullPackage, Version=v{Version}",
                 workstation.PcId, authoritativeVersionNumber);
+
+            _metrics?.RecordSyncRequest("success", "Full");
+            if (_securityEventService != null)
+            {
+                await _securityEventService.RecordSecurityEventAsync(
+                    eventType: "CONFIG_SYNCED",
+                    actorId: null,
+                    actorType: "Workstation",
+                    deviceId: workstation.PcId,
+                    organizationId: workstation.OrganizationEntityId,
+                    siteId: workstation.SiteEntityId,
+                    resourceType: "WorkstationConfiguration",
+                    resourceId: workstation.Id,
+                    action: "SYNC_FULL",
+                    result: "SUCCESS",
+                    failureReason: null,
+                    cancellationToken: cancellationToken);
+            }
 
             return Result.Success(new ConfigurationSyncResult
             {

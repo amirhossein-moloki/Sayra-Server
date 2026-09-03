@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Configuration.Models;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
@@ -19,33 +20,81 @@ namespace Sayra.Backend.Application.Configuration
     public class ValidateConfigurationCommandHandler : ICommandHandler<ValidateConfigurationCommand, ConfigurationValidationResult>
     {
         private readonly IConfigurationValidator _validator;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
 
-        public ValidateConfigurationCommandHandler(IConfigurationValidator validator)
+        public ValidateConfigurationCommandHandler(
+            IConfigurationValidator validator,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
-        public Task<Result<ConfigurationValidationResult>> HandleAsync(ValidateConfigurationCommand command, CancellationToken cancellationToken = default)
+        public async Task<Result<ConfigurationValidationResult>> HandleAsync(ValidateConfigurationCommand command, CancellationToken cancellationToken = default)
         {
             if (command == null)
             {
-                return Task.FromResult(Result.Failure<ConfigurationValidationResult>("NULL_COMMAND", "Command cannot be null."));
+                return Result.Failure<ConfigurationValidationResult>("NULL_COMMAND", "Command cannot be null.");
             }
 
+            ConfigurationValidationResult valResult;
             if (command.SchemaModel != null)
             {
-                var result = _validator.Validate(command.SchemaModel);
-                return Task.FromResult(Result.Success(result));
+                valResult = _validator.Validate(command.SchemaModel);
             }
-
-            if (command.RawPayload != null)
+            else if (command.RawPayload != null)
             {
-                var result = _validator.Validate(command.RawPayload);
-                return Task.FromResult(Result.Success(result));
+                valResult = _validator.Validate(command.RawPayload);
+            }
+            else
+            {
+                valResult = ConfigurationValidationResult.Failure("", "PAYLOAD_EMPTY", "Either RawPayload or SchemaModel must be provided.");
             }
 
-            var emptyResult = ConfigurationValidationResult.Failure("", "PAYLOAD_EMPTY", "Either RawPayload or SchemaModel must be provided.");
-            return Task.FromResult(Result.Success(emptyResult));
+            if (!valResult.IsValid)
+            {
+                _metrics?.RecordValidationFailure(valResult.Errors.FirstOrDefault()?.Code ?? "VALIDATION_FAILED");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_VALIDATION_FAILED",
+                        actorId: null,
+                        actorType: "User",
+                        deviceId: null,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "ConfigurationPackage",
+                        resourceId: null,
+                        action: "VALIDATE",
+                        result: "FAILED",
+                        failureReason: string.Join("; ", valResult.Errors.Select(e => e.Message)),
+                        cancellationToken: cancellationToken);
+                }
+            }
+            else
+            {
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_VALIDATED",
+                        actorId: null,
+                        actorType: "User",
+                        deviceId: null,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "ConfigurationPackage",
+                        resourceId: null,
+                        action: "VALIDATE",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+                }
+            }
+
+            return Result.Success(valResult);
         }
     }
 
@@ -104,6 +153,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationNormalizer _normalizer;
         private readonly IConfigurationValidator _validator;
         private readonly IConfigurationSigningService? _signingService;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
 
         public CreateFullConfigurationVersionCommandHandler(
@@ -111,13 +162,17 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationNormalizer normalizer,
             IConfigurationValidator validator,
             IUnitOfWork unitOfWork,
-            IConfigurationSigningService? signingService = null)
+            IConfigurationSigningService? signingService = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _signingService = signingService;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPackage>> HandleAsync(CreateFullConfigurationVersionCommand command, CancellationToken cancellationToken = default)
@@ -174,6 +229,40 @@ namespace Sayra.Backend.Application.Configuration
 
                 await _repository.AddAsync(package, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_CREATED",
+                        actorId: null,
+                        actorType: command.IssuedBy,
+                        deviceId: null,
+                        organizationId: null,
+                        siteId: null,
+                        resourceType: "ConfigurationPackage",
+                        resourceId: package.Id,
+                        action: "CREATE_FULL",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+
+                    if (_signingService != null)
+                    {
+                        await _securityEventService.RecordSecurityEventAsync(
+                            eventType: "CONFIG_SIGNED",
+                            actorId: null,
+                            actorType: command.IssuedBy,
+                            deviceId: null,
+                            organizationId: null,
+                            siteId: null,
+                            resourceType: "ConfigurationPackage",
+                            resourceId: package.Id,
+                            action: "SIGN",
+                            result: "SUCCESS",
+                            failureReason: null,
+                            cancellationToken: cancellationToken);
+                    }
+                }
 
                 return Result.Success(package);
             }, cancellationToken);

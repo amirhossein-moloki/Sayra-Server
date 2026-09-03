@@ -61,6 +61,9 @@ namespace Sayra.Backend.Application.Configuration
             Guid workstationId,
             CancellationToken cancellationToken = default)
         {
+            using var activity = _configurationCache is IConfigurationMetrics m ? m.StartActivity("ConfigurationResolution") : null;
+            activity?.SetTag("workstation.id", workstationId);
+
             // 1. Authoritative Identity & Context Validation
             var workstation = await _workstationRepository.GetByIdAsync(workstationId, track: false, cancellationToken);
             if (workstation == null)

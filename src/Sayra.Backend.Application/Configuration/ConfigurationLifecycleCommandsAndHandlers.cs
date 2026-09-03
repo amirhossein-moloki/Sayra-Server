@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Shared;
@@ -127,6 +128,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPublicationRepository _publicationRepository;
         private readonly IConfigurationSigningService _signingService;
         private readonly IConfigurationValidator _validator;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -138,7 +141,9 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationSigningService signingService,
             IConfigurationValidator validator,
             IUnitOfWork unitOfWork,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
@@ -148,6 +153,8 @@ namespace Sayra.Backend.Application.Configuration
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(PreparePublicationCommand command, CancellationToken cancellationToken = default)
@@ -229,6 +236,24 @@ namespace Sayra.Backend.Application.Configuration
             await _publicationRepository.AddAsync(publication, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (_securityEventService != null)
+            {
+                await _securityEventService.RecordSecurityEventAsync(
+                    eventType: "CONFIG_CREATED",
+                    actorId: null,
+                    actorType: command.Actor ?? "system",
+                    deviceId: null,
+                    organizationId: target.OrganizationId,
+                    siteId: target.SiteId,
+                    resourceType: "ConfigurationPublication",
+                    resourceId: publication.Id,
+                    action: "PREPARE_PUBLICATION",
+                    result: "SUCCESS",
+                    failureReason: null,
+                    correlationId: command.CorrelationId,
+                    cancellationToken: cancellationToken);
+            }
+
             await ConfigurationCacheInvalidationHelper.InvalidateTargetCacheAsync(_configurationCache, target, cancellationToken);
 
             return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
@@ -254,6 +279,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPublicationRepository _publicationRepository;
         private readonly IConfigurationSigningService _signingService;
         private readonly IConfigurationValidator _validator;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -265,7 +292,9 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationSigningService signingService,
             IConfigurationValidator validator,
             IUnitOfWork unitOfWork,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
@@ -275,6 +304,8 @@ namespace Sayra.Backend.Application.Configuration
             _validator = validator ?? throw new ArgumentNullException(nameof(validator));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(PublishConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -374,6 +405,25 @@ namespace Sayra.Backend.Application.Configuration
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                _metrics?.RecordPublish("success");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_PUBLISHED",
+                        actorId: null,
+                        actorType: command.Actor ?? "system",
+                        deviceId: null,
+                        organizationId: target.OrganizationId,
+                        siteId: target.SiteId,
+                        resourceType: "ConfigurationPublication",
+                        resourceId: publication.Id,
+                        action: "PUBLISH",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        correlationId: command.CorrelationId,
+                        cancellationToken: cancellationToken);
+                }
+
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
 
@@ -403,6 +453,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationTargetRepository? _targetRepository;
         private readonly IConfigurationSigningService _signingService;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -412,7 +464,9 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationSigningService signingService,
             IUnitOfWork unitOfWork,
             IConfigurationTargetRepository? targetRepository = null,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _publicationRepository = publicationRepository ?? throw new ArgumentNullException(nameof(publicationRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
@@ -420,6 +474,8 @@ namespace Sayra.Backend.Application.Configuration
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _targetRepository = targetRepository;
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(ActivateConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -490,6 +546,40 @@ namespace Sayra.Backend.Application.Configuration
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                if (_securityEventService != null)
+                {
+                    if (currentActive != null)
+                    {
+                        await _securityEventService.RecordSecurityEventAsync(
+                            eventType: "CONFIG_SUPERSEDED",
+                            actorId: null,
+                            actorType: command.Actor ?? "system",
+                            deviceId: null,
+                            organizationId: publication.OrganizationId,
+                            siteId: affectedTarget?.SiteId,
+                            resourceType: "ConfigurationPublication",
+                            resourceId: currentActive.Id,
+                            action: "SUPERSEDE",
+                            result: "SUCCESS",
+                            failureReason: null,
+                            cancellationToken: cancellationToken);
+                    }
+
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_ACTIVATED",
+                        actorId: null,
+                        actorType: command.Actor ?? "system",
+                        deviceId: null,
+                        organizationId: publication.OrganizationId,
+                        siteId: affectedTarget?.SiteId,
+                        resourceType: "ConfigurationPublication",
+                        resourceId: publication.Id,
+                        action: "ACTIVATE",
+                        result: "SUCCESS",
+                        failureReason: null,
+                        cancellationToken: cancellationToken);
+                }
+
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
 
@@ -515,6 +605,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationPublicationRepository _publicationRepository;
         private readonly IConfigurationPackageRepository _packageRepository;
         private readonly IConfigurationTargetRepository? _targetRepository;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfigurationCache? _configurationCache;
 
@@ -523,13 +615,17 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationPackageRepository packageRepository,
             IUnitOfWork unitOfWork,
             IConfigurationTargetRepository? targetRepository = null,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _publicationRepository = publicationRepository ?? throw new ArgumentNullException(nameof(publicationRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _targetRepository = targetRepository;
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(RevokeConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -568,6 +664,23 @@ namespace Sayra.Backend.Application.Configuration
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_REVOKED",
+                        actorId: null,
+                        actorType: command.Actor ?? "system",
+                        deviceId: null,
+                        organizationId: publication.OrganizationId,
+                        siteId: affectedTarget?.SiteId,
+                        resourceType: "ConfigurationPublication",
+                        resourceId: publication.Id,
+                        action: "REVOKE",
+                        result: "SUCCESS",
+                        failureReason: command.Reason,
+                        cancellationToken: cancellationToken);
+                }
+
                 return Result.Success(ConfigurationPublicationDto.FromDomain(publication));
             }, cancellationToken);
 
@@ -602,6 +715,8 @@ namespace Sayra.Backend.Application.Configuration
         private readonly IConfigurationSigningService _signingService;
         private readonly IConfigurationValidator _validator;
         private readonly IConfigurationDeltaEngine _deltaEngine;
+        private readonly ISecurityEventService? _securityEventService;
+        private readonly IConfigurationMetrics? _metrics;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ReconstructConfigurationCommandHandler _reconstructHandler;
         private readonly IConfigurationCache? _configurationCache;
@@ -615,7 +730,9 @@ namespace Sayra.Backend.Application.Configuration
             IConfigurationValidator validator,
             IConfigurationDeltaEngine deltaEngine,
             IUnitOfWork unitOfWork,
-            IConfigurationCache? configurationCache = null)
+            IConfigurationCache? configurationCache = null,
+            ISecurityEventService? securityEventService = null,
+            IConfigurationMetrics? metrics = null)
         {
             _targetRepository = targetRepository ?? throw new ArgumentNullException(nameof(targetRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
@@ -627,6 +744,8 @@ namespace Sayra.Backend.Application.Configuration
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _reconstructHandler = new ReconstructConfigurationCommandHandler(packageRepository, deltaEngine);
             _configurationCache = configurationCache;
+            _securityEventService = securityEventService;
+            _metrics = metrics;
         }
 
         public async Task<Result<ConfigurationPublicationDto>> HandleAsync(RollbackConfigurationCommand command, CancellationToken cancellationToken = default)
@@ -748,6 +867,25 @@ namespace Sayra.Backend.Application.Configuration
 
                 await _publicationRepository.AddAsync(rollbackPublication, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                _metrics?.RecordRollback("success");
+                if (_securityEventService != null)
+                {
+                    await _securityEventService.RecordSecurityEventAsync(
+                        eventType: "CONFIG_ROLLBACK",
+                        actorId: null,
+                        actorType: command.Actor ?? "system",
+                        deviceId: null,
+                        organizationId: target.OrganizationId,
+                        siteId: target.SiteId,
+                        resourceType: "ConfigurationPublication",
+                        resourceId: rollbackPublication.Id,
+                        action: "ROLLBACK",
+                        result: "SUCCESS",
+                        failureReason: command.Reason,
+                        correlationId: command.CorrelationId,
+                        cancellationToken: cancellationToken);
+                }
 
                 return Result.Success(ConfigurationPublicationDto.FromDomain(rollbackPublication));
             }, cancellationToken);
