@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,12 @@ namespace Sayra.Backend.Api.Controllers
     [Route("api/config/package")]
     public class ConfigurationSyncController : ControllerBase
     {
+        private static readonly ConcurrentDictionary<string, DateTime> IpRateLimitMap = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
+        public static void ResetRateLimitMap()
+        {
+            IpRateLimitMap.Clear();
+        }
         private readonly IQueryHandler<SynchronizeConfigurationQuery, ConfigurationSyncResult> _syncHandler;
 
         public ConfigurationSyncController(IQueryHandler<SynchronizeConfigurationQuery, ConfigurationSyncResult> syncHandler)
@@ -32,13 +39,12 @@ namespace Sayra.Backend.Api.Controllers
         {
             // 0. Rate limiting / Rapid repeated sync abuse protection (HTTP 429)
             string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            string rateKey = $"sayra:rate:config_sync:{clientIp}";
 
-            if (HttpContext.Items[rateKey] is DateTime lastSyncTime && (DateTime.UtcNow - lastSyncTime).TotalMilliseconds < 200)
+            if (IpRateLimitMap.TryGetValue(clientIp, out var lastSyncTime) && (DateTime.UtcNow - lastSyncTime).TotalMilliseconds < 200)
             {
                 return StatusCode(429, new { code = "RATE_LIMIT_EXCEEDED", message = "Too many configuration synchronization requests. Please retry after a delay." });
             }
-            HttpContext.Items[rateKey] = DateTime.UtcNow;
+            IpRateLimitMap[clientIp] = DateTime.UtcNow;
 
             // 1. Resolve Authenticated Server-Authoritative Identity from UserPrincipalMiddleware
             var principal = HttpContext.Items["UserPrincipal"] as UserPrincipal;
