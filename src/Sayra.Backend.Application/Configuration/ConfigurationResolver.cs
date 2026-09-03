@@ -124,21 +124,28 @@ namespace Sayra.Backend.Application.Configuration
             // Cache Lookup
             if (_configurationCache != null)
             {
-                var cachedConfig = await _configurationCache.GetEffectiveConfigurationAsync(
-                    orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
-
-                if (cachedConfig != null)
+                try
                 {
-                    var cachedResolution = new ConfigurationResolutionResult
-                    {
-                        EffectiveConfigurationJson = cachedConfig.EffectiveConfigurationJson,
-                        SchemaVersion = cachedConfig.SchemaVersion,
-                        AppliedSources = cachedConfig.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
-                        FieldTraces = cachedConfig.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
-                        Warnings = cachedConfig.Warnings ?? new List<string>()
-                    };
+                    var cachedConfig = await _configurationCache.GetEffectiveConfigurationAsync(
+                        orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
 
-                    return Result<ConfigurationResolutionResult>.Success(cachedResolution);
+                    if (cachedConfig != null)
+                    {
+                        var cachedResolution = new ConfigurationResolutionResult
+                        {
+                            EffectiveConfigurationJson = cachedConfig.EffectiveConfigurationJson,
+                            SchemaVersion = cachedConfig.SchemaVersion,
+                            AppliedSources = cachedConfig.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
+                            FieldTraces = cachedConfig.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
+                            Warnings = cachedConfig.Warnings ?? new List<string>()
+                        };
+
+                        return Result<ConfigurationResolutionResult>.Success(cachedResolution);
+                    }
+                }
+                catch
+                {
+                    // Fail-safe: fall back to PostgreSQL database resolution on cache error
                 }
             }
 
@@ -146,7 +153,14 @@ namespace Sayra.Backend.Application.Configuration
             IDisposable? stampedeLock = null;
             if (_configurationCache != null)
             {
-                stampedeLock = await _configurationCache.AcquireStampedeLockAsync(orgId, workstation.Id, cancellationToken);
+                try
+                {
+                    stampedeLock = await _configurationCache.AcquireStampedeLockAsync(orgId, workstation.Id, cancellationToken);
+                }
+                catch
+                {
+                    // Fail-safe: ignore lock errors
+                }
             }
 
             try
@@ -154,21 +168,28 @@ namespace Sayra.Backend.Application.Configuration
                 // Double-check cache if lock was acquired
                 if (_configurationCache != null && stampedeLock != null)
                 {
-                    var secondCached = await _configurationCache.GetEffectiveConfigurationAsync(
-                        orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
-
-                    if (secondCached != null)
+                    try
                     {
-                        var cachedResolution = new ConfigurationResolutionResult
-                        {
-                            EffectiveConfigurationJson = secondCached.EffectiveConfigurationJson,
-                            SchemaVersion = secondCached.SchemaVersion,
-                            AppliedSources = secondCached.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
-                            FieldTraces = secondCached.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
-                            Warnings = secondCached.Warnings ?? new List<string>()
-                        };
+                        var secondCached = await _configurationCache.GetEffectiveConfigurationAsync(
+                            orgId, workstation.Id, siteId, activeGroupIds, cancellationToken);
 
-                        return Result<ConfigurationResolutionResult>.Success(cachedResolution);
+                        if (secondCached != null)
+                        {
+                            var cachedResolution = new ConfigurationResolutionResult
+                            {
+                                EffectiveConfigurationJson = secondCached.EffectiveConfigurationJson,
+                                SchemaVersion = secondCached.SchemaVersion,
+                                AppliedSources = secondCached.AppliedSources ?? new List<AppliedConfigurationSourceDto>(),
+                                FieldTraces = secondCached.FieldTraces ?? new List<ConfigurationFieldTraceDto>(),
+                                Warnings = secondCached.Warnings ?? new List<string>()
+                            };
+
+                            return Result<ConfigurationResolutionResult>.Success(cachedResolution);
+                        }
+                    }
+                    catch
+                    {
+                        // Fail-safe
                     }
                 }
 

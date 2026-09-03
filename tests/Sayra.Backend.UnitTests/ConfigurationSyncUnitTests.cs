@@ -38,6 +38,7 @@ namespace Sayra.Backend.UnitTests
 
         public ConfigurationSyncUnitTests()
         {
+            ConfigurationSyncController.ResetRateLimitMap();
             _handler = new SynchronizeConfigurationQueryHandler(
                 _workstationRepoMock.Object,
                 _resolverMock.Object,

@@ -14,18 +14,14 @@ namespace Sayra.Backend.Infrastructure.Security
     /// <summary>
     /// Production-grade signing private key provider.
     /// Manages loading private keys securely from SecurityOptions or secret management.
-    /// Generates isolated ephemeral in-memory RSA key pairs for testing/dev environments
+    /// Generates isolated ephemeral in-memory RSA key pairs per keyId for testing/dev environments
     /// without ever storing private keys in source code, configuration files, or database tables.
     /// </summary>
     public class SigningPrivateKeyProvider : ISigningPrivateKeyProvider
     {
         private readonly SecurityOptions _options;
-        private readonly ConcurrentDictionary<string, string> _privateKeyMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private readonly ConcurrentDictionary<string, string> _publicKeyMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly object SyncLock = new object();
-        private static string? EphemeralActiveKeyId;
-        private static string? EphemeralActivePrivateKeyPem;
-        private static string? EphemeralActivePublicKeyPem;
+        private static readonly ConcurrentDictionary<string, string> GlobalPrivateKeyMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, string> GlobalPublicKeyMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public SigningPrivateKeyProvider(IOptions<SecurityOptions> options)
         {
@@ -39,7 +35,9 @@ namespace Sayra.Backend.Infrastructure.Security
                 throw new ArgumentException("KeyId cannot be null or empty.", nameof(keyId));
             }
 
-            if (_privateKeyMap.TryGetValue(keyId.Trim(), out var customPrivateKeyPem))
+            string trimmed = keyId.Trim();
+
+            if (GlobalPrivateKeyMap.TryGetValue(trimmed, out var customPrivateKeyPem))
             {
                 return Task.FromResult(customPrivateKeyPem);
             }
@@ -49,24 +47,13 @@ namespace Sayra.Backend.Infrastructure.Security
                 return Task.FromResult(_options.PrivateKeyPem);
             }
 
-            EnsureEphemeralKeyPair();
-            if (string.Equals(keyId.Trim(), EphemeralActiveKeyId, StringComparison.OrdinalIgnoreCase))
-            {
-                return Task.FromResult(EphemeralActivePrivateKeyPem!);
-            }
-
-            throw new InvalidOperationException($"Private key for KeyId '{keyId}' was not found in secret store.");
+            var (_, _, privateKeyPem) = GetOrCreateEphemeralKeyPair(trimmed);
+            return Task.FromResult(privateKeyPem);
         }
 
         public Task<string> GetActivePrivateKeyPemAsync(CancellationToken cancellationToken = default)
         {
-            if (!string.IsNullOrWhiteSpace(_options.PrivateKeyPem))
-            {
-                return Task.FromResult(_options.PrivateKeyPem);
-            }
-
-            EnsureEphemeralKeyPair();
-            return Task.FromResult(EphemeralActivePrivateKeyPem!);
+            return GetPrivateKeyPemAsync("config-signing-active-01", cancellationToken);
         }
 
         public Task<string> GetPublicKeyPemAsync(string keyId, CancellationToken cancellationToken = default)
@@ -76,7 +63,9 @@ namespace Sayra.Backend.Infrastructure.Security
                 throw new ArgumentException("KeyId cannot be null or empty.", nameof(keyId));
             }
 
-            if (_publicKeyMap.TryGetValue(keyId.Trim(), out var customPublicKeyPem))
+            string trimmed = keyId.Trim();
+
+            if (GlobalPublicKeyMap.TryGetValue(trimmed, out var customPublicKeyPem))
             {
                 return Task.FromResult(customPublicKeyPem);
             }
@@ -86,19 +75,13 @@ namespace Sayra.Backend.Infrastructure.Security
                 return Task.FromResult(_options.PublicKeyPem);
             }
 
-            EnsureEphemeralKeyPair();
-            return Task.FromResult(EphemeralActivePublicKeyPem!);
+            var (_, publicKeyPem, _) = GetOrCreateEphemeralKeyPair(trimmed);
+            return Task.FromResult(publicKeyPem);
         }
 
         public Task<string> GetActivePublicKeyPemAsync(CancellationToken cancellationToken = default)
         {
-            if (!string.IsNullOrWhiteSpace(_options.PublicKeyPem))
-            {
-                return Task.FromResult(_options.PublicKeyPem);
-            }
-
-            EnsureEphemeralKeyPair();
-            return Task.FromResult(EphemeralActivePublicKeyPem!);
+            return GetPublicKeyPemAsync("config-signing-active-01", cancellationToken);
         }
 
         public void RegisterTestKeyPair(string keyId, string publicKeyPem, string privateKeyPem)
@@ -107,31 +90,26 @@ namespace Sayra.Backend.Infrastructure.Security
             if (string.IsNullOrWhiteSpace(publicKeyPem)) throw new ArgumentException("PublicKeyPem cannot be null or empty.", nameof(publicKeyPem));
             if (string.IsNullOrWhiteSpace(privateKeyPem)) throw new ArgumentException("PrivateKeyPem cannot be null or empty.", nameof(privateKeyPem));
 
-            _publicKeyMap[keyId.Trim()] = publicKeyPem.Trim();
-            _privateKeyMap[keyId.Trim()] = privateKeyPem.Trim();
+            GlobalPublicKeyMap[keyId.Trim()] = publicKeyPem.Trim();
+            GlobalPrivateKeyMap[keyId.Trim()] = privateKeyPem.Trim();
         }
 
         public static (string keyId, string publicKeyPem, string privateKeyPem) GetOrCreateEphemeralKeyPair(string keyId = "config-signing-active-01")
         {
-            lock (SyncLock)
+            string trimmed = keyId.Trim();
+            if (GlobalPrivateKeyMap.TryGetValue(trimmed, out var privPem) && GlobalPublicKeyMap.TryGetValue(trimmed, out var pubPem))
             {
-                if (EphemeralActivePrivateKeyPem == null || EphemeralActiveKeyId != keyId)
-                {
-                    using var rsa = RSA.Create(2048);
-                    EphemeralActiveKeyId = keyId;
-                    EphemeralActivePrivateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
-                    EphemeralActivePublicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();
-                }
-                return (EphemeralActiveKeyId, EphemeralActivePublicKeyPem!, EphemeralActivePrivateKeyPem!);
+                return (trimmed, pubPem, privPem);
             }
-        }
 
-        private static void EnsureEphemeralKeyPair()
-        {
-            if (EphemeralActivePrivateKeyPem == null)
-            {
-                GetOrCreateEphemeralKeyPair();
-            }
+            using var rsa = RSA.Create(2048);
+            var createdPriv = rsa.ExportPkcs8PrivateKeyPem();
+            var createdPub = rsa.ExportSubjectPublicKeyInfoPem();
+
+            GlobalPrivateKeyMap.TryAdd(trimmed, createdPriv);
+            GlobalPublicKeyMap.TryAdd(trimmed, createdPub);
+
+            return (trimmed, GlobalPublicKeyMap[trimmed], GlobalPrivateKeyMap[trimmed]);
         }
     }
 }
