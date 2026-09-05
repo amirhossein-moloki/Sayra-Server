@@ -121,6 +121,29 @@ namespace Sayra.Backend.Domain
             }
         }
 
+        public void SetIntegrity(string sha256)
+        {
+            if (IsImmutableArtifactState())
+            {
+                throw new InvalidDomainException("PACKAGE_IMMUTABLE", $"Package '{FileName}' in lifecycle state '{LifecycleState}' is immutable and cryptographic metadata cannot be modified.");
+            }
+
+            if (string.IsNullOrWhiteSpace(sha256))
+            {
+                throw new InvalidDomainException("INVALID_HASH", "SHA-256 hash cannot be null or empty.");
+            }
+
+            var trimmedHash = sha256.Trim().ToLowerInvariant();
+
+            if (!Sha256Regex.IsMatch(trimmedHash))
+            {
+                throw new InvalidDomainException("INVALID_HASH_FORMAT", "SHA-256 hash must be a valid 64-character hexadecimal string.");
+            }
+
+            SHA256 = trimmedHash;
+            UpdatedAt = DateTime.UtcNow;
+        }
+
         public void SetIntegrityAndSignature(string sha256, string signature, string signingKeyId)
         {
             if (IsImmutableArtifactState())
@@ -153,6 +176,23 @@ namespace Sayra.Backend.Domain
             SHA256 = trimmedHash;
             Signature = signature.Trim();
             SigningKeyId = signingKeyId.Trim();
+            UpdatedAt = DateTime.UtcNow;
+        }
+
+        public void UpdateStorageKeyAndSize(string newStorageKey, long size)
+        {
+            if (IsImmutableArtifactState())
+            {
+                throw new InvalidDomainException("PACKAGE_IMMUTABLE", $"Package '{FileName}' in lifecycle state '{LifecycleState}' is immutable and storage metadata cannot be modified.");
+            }
+
+            if (size <= 0)
+            {
+                throw new InvalidDomainException("INVALID_PACKAGE_SIZE", "Package size must be strictly greater than 0 bytes.");
+            }
+
+            StorageKey = ValidateAndNormalizeStorageKey(newStorageKey);
+            Size = size;
             UpdatedAt = DateTime.UtcNow;
         }
 

@@ -34,6 +34,10 @@ namespace Sayra.Backend.Application.Security
         public const string ProcessPayment = "ProcessPayment";
         public const string ViewLedger = "ViewLedger";
 
+        // Software Update & Distribution Platform Permissions
+        public const string ManageUpdates = "ManageUpdates";
+        public const string ViewUpdates = "ViewUpdates";
+
         // Administration & Security Permissions
         public const string ManageUsers = "ManageUsers";
         public const string ManageRoles = "ManageRoles";

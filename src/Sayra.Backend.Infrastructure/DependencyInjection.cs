@@ -39,6 +39,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<TlsOptions>(configuration.GetSection(TlsOptions.SectionName));
             services.Configure<LoggingOptions>(configuration.GetSection(LoggingOptions.SectionName));
             services.Configure<UpdatesOptions>(configuration.GetSection(UpdatesOptions.SectionName));
+            services.Configure<Sayra.Backend.Application.Updates.UpdateValidationOptions>(configuration.GetSection(Sayra.Backend.Application.Updates.UpdateValidationOptions.SectionName));
             services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
 
             // 2. Database Foundation Setup
@@ -231,6 +232,17 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
             services.AddScoped<IUpdateReleaseRepository, UpdateReleaseRepository>();
             services.AddScoped<IUpdatePackageRepository, UpdatePackageRepository>();
+
+            // Update Artifact Ingestion, Storage & Package Validation Services
+            services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateArtifactStorage, Sayra.Backend.Infrastructure.Updates.LocalUpdateArtifactStorage>();
+            services.AddSingleton<Sayra.Backend.Application.Updates.IUpdatePackageValidator, Sayra.Backend.Application.Updates.UpdatePackageValidator>();
+            services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateHashService, Sayra.Backend.Application.Updates.UpdateHashService>();
+
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.ValidateUpdatePackageCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdatePackageQuery, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.GetUpdatePackageQueryHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.DeleteUpdatePackageCommand, bool>, Sayra.Backend.Application.Updates.DeleteUpdatePackageCommandHandler>();
+
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
