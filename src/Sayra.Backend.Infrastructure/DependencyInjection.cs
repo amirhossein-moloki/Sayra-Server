@@ -229,6 +229,8 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IWorkstationGroupRepository, WorkstationGroupRepository>();
             services.AddScoped<IConfigurationTargetRepository, ConfigurationTargetRepository>();
             services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
+            services.AddScoped<IUpdateReleaseRepository, UpdateReleaseRepository>();
+            services.AddScoped<IUpdatePackageRepository, UpdatePackageRepository>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
