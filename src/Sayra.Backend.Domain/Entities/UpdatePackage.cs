@@ -179,6 +179,44 @@ namespace Sayra.Backend.Domain
             UpdatedAt = DateTime.UtcNow;
         }
 
+        public void SignPackage(string signature, string signingKeyId)
+        {
+            if (LifecycleState != UpdatePackageLifecycleState.Validated)
+            {
+                throw new InvalidDomainException("INVALID_LIFECYCLE_STATE", $"Package '{FileName}' must be in '{UpdatePackageLifecycleState.Validated}' state to be signed. Current state is '{LifecycleState}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(SHA256))
+            {
+                throw new InvalidDomainException("HASH_MISSING", $"Package '{FileName}' cannot be signed without an authoritative SHA-256 hash.");
+            }
+
+            if (string.IsNullOrWhiteSpace(signature))
+            {
+                throw new InvalidDomainException("INVALID_SIGNATURE", "Signature cannot be null or empty.");
+            }
+
+            if (string.IsNullOrWhiteSpace(signingKeyId))
+            {
+                throw new InvalidDomainException("INVALID_SIGNING_KEY_ID", "Signing key ID cannot be null or empty.");
+            }
+
+            Signature = signature.Trim();
+            SigningKeyId = signingKeyId.Trim();
+            TransitionLifecycle(UpdatePackageLifecycleState.Signed);
+        }
+
+        public void InvalidateSignature()
+        {
+            Signature = null;
+            SigningKeyId = null;
+            if (LifecycleState == UpdatePackageLifecycleState.Signed || LifecycleState == UpdatePackageLifecycleState.Ready)
+            {
+                TransitionLifecycle(UpdatePackageLifecycleState.Validated);
+            }
+            UpdatedAt = DateTime.UtcNow;
+        }
+
         public void UpdateStorageKeyAndSize(string newStorageKey, long size)
         {
             if (IsImmutableArtifactState())
