@@ -720,6 +720,7 @@
         "dependencies": {
           "FluentValidation": "12.1.1",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0",
+          "Microsoft.Extensions.Options": "8.0.2",
           "Sayra.Backend.Contracts": "1.0.0",
           "Sayra.Backend.Domain": "1.0.0",
           "Sayra.Backend.Shared": "1.0.0"
