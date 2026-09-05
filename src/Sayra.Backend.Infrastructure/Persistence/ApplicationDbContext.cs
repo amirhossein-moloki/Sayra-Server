@@ -57,6 +57,8 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<WorkstationGroupMember> WorkstationGroupMembers { get; set; } = null!;
         public DbSet<ConfigurationTarget> ConfigurationTargets { get; set; } = null!;
         public DbSet<ConfigurationAssignment> ConfigurationAssignments { get; set; } = null!;
+        public DbSet<UpdateRelease> UpdateReleases { get; set; } = null!;
+        public DbSet<UpdatePackage> UpdatePackages { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
