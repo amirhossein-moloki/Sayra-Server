@@ -246,6 +246,9 @@ namespace Sayra.Backend.Infrastructure
             // Update Eligibility & Staged Rollout Decision Engine (Stage 07-06)
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateEligibilityService, Sayra.Backend.Application.Updates.UpdateEligibilityService>();
 
+            // Update Manifest & Discovery Service (Stage 07-07)
+            services.AddScoped<Sayra.Backend.Application.Updates.IUpdateManifestService, Sayra.Backend.Application.Updates.UpdateManifestService>();
+
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.ValidateUpdatePackageCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdatePackageQuery, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.GetUpdatePackageQueryHandler>();
