@@ -238,10 +238,16 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdatePackageValidator, Sayra.Backend.Application.Updates.UpdatePackageValidator>();
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateHashService, Sayra.Backend.Application.Updates.UpdateHashService>();
 
+            // Update Cryptographic Signing Infrastructure (Stage 07-04)
+            services.AddScoped<Sayra.Backend.Application.Updates.IUpdateSigningKeyProvider, Sayra.Backend.Infrastructure.Updates.UpdateSigningKeyProvider>();
+            services.AddScoped<Sayra.Backend.Application.Updates.IUpdateSigningService, Sayra.Backend.Application.Updates.UpdateSigningService>();
+
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.ValidateUpdatePackageCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdatePackageQuery, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.GetUpdatePackageQueryHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.DeleteUpdatePackageCommand, bool>, Sayra.Backend.Application.Updates.DeleteUpdatePackageCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.SignUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.SignUpdatePackageCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.VerifyUpdatePackageSignatureQuery, Sayra.Backend.Application.Updates.UpdateSignatureVerificationResult>, Sayra.Backend.Application.Updates.VerifyUpdatePackageSignatureQueryHandler>();
 
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();

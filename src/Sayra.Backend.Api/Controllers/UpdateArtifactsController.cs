@@ -22,17 +22,23 @@ namespace Sayra.Backend.Api.Controllers
         private readonly ICommandHandler<ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract> _validateHandler;
         private readonly IQueryHandler<GetUpdatePackageQuery, ClientUpdatePackageMetadataContract> _getQueryHandler;
         private readonly ICommandHandler<DeleteUpdatePackageCommand, bool> _deleteHandler;
+        private readonly ICommandHandler<SignUpdatePackageCommand, ClientUpdatePackageMetadataContract> _signHandler;
+        private readonly IQueryHandler<VerifyUpdatePackageSignatureQuery, UpdateSignatureVerificationResult> _verifyHandler;
 
         public UpdateArtifactsController(
             ICommandHandler<UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract> uploadHandler,
             ICommandHandler<ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract> validateHandler,
             IQueryHandler<GetUpdatePackageQuery, ClientUpdatePackageMetadataContract> getQueryHandler,
-            ICommandHandler<DeleteUpdatePackageCommand, bool> deleteHandler)
+            ICommandHandler<DeleteUpdatePackageCommand, bool> deleteHandler,
+            ICommandHandler<SignUpdatePackageCommand, ClientUpdatePackageMetadataContract> signHandler,
+            IQueryHandler<VerifyUpdatePackageSignatureQuery, UpdateSignatureVerificationResult> verifyHandler)
         {
             _uploadHandler = uploadHandler ?? throw new ArgumentNullException(nameof(uploadHandler));
             _validateHandler = validateHandler ?? throw new ArgumentNullException(nameof(validateHandler));
             _getQueryHandler = getQueryHandler ?? throw new ArgumentNullException(nameof(getQueryHandler));
             _deleteHandler = deleteHandler ?? throw new ArgumentNullException(nameof(deleteHandler));
+            _signHandler = signHandler ?? throw new ArgumentNullException(nameof(signHandler));
+            _verifyHandler = verifyHandler ?? throw new ArgumentNullException(nameof(verifyHandler));
         }
 
         [HttpPost("releases/{releaseId:guid}/packages/upload")]
@@ -176,6 +182,77 @@ namespace Sayra.Backend.Api.Controllers
             }
 
             return NoContent();
+        }
+
+        [HttpPost("packages/{packageId:guid}/sign")]
+        [HasPermission(PermissionCatalog.ManageUpdates)]
+        public async Task<IActionResult> SignPackageAsync(
+            Guid packageId,
+            [FromQuery] string? keyId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var principal = GetActingPrincipal();
+            var command = new SignUpdatePackageCommand
+            {
+                PackageId = packageId,
+                KeyId = keyId,
+                Principal = principal
+            };
+
+            var result = await _signHandler.HandleAsync(command, cancellationToken);
+            if (!result.IsSuccess || result.Value == null)
+            {
+                if (result.ErrorCode == "PERMISSION_DENIED" || result.ErrorCode == "CROSS_ORGANIZATION_ACCESS_DENIED")
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                if (result.ErrorCode == "PACKAGE_NOT_FOUND" || result.ErrorCode == "RELEASE_NOT_FOUND")
+                {
+                    return NotFound(new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                if (result.ErrorCode == "TOCTOU_INTEGRITY_VIOLATION")
+                {
+                    return StatusCode(StatusCodes.Status422UnprocessableEntity, new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                return BadRequest(new { code = result.ErrorCode ?? "SIGNING_FAILED", message = result.ErrorMessage });
+            }
+
+            return Ok(result.Value);
+        }
+
+        [HttpPost("packages/{packageId:guid}/verify")]
+        [HasPermission(PermissionCatalog.ViewUpdates)]
+        public async Task<IActionResult> VerifyPackageAsync(
+            Guid packageId,
+            CancellationToken cancellationToken = default)
+        {
+            var principal = GetActingPrincipal();
+            var query = new VerifyUpdatePackageSignatureQuery
+            {
+                PackageId = packageId,
+                Principal = principal
+            };
+
+            var result = await _verifyHandler.HandleAsync(query, cancellationToken);
+            if (!result.IsSuccess || result.Value == null)
+            {
+                if (result.ErrorCode == "PERMISSION_DENIED" || result.ErrorCode == "CROSS_ORGANIZATION_ACCESS_DENIED")
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                if (result.ErrorCode == "PACKAGE_NOT_FOUND" || result.ErrorCode == "RELEASE_NOT_FOUND")
+                {
+                    return NotFound(new { code = result.ErrorCode, message = result.ErrorMessage });
+                }
+
+                return BadRequest(new { code = result.ErrorCode ?? "VERIFICATION_FAILED", message = result.ErrorMessage });
+            }
+
+            return Ok(result.Value);
         }
 
         private UserPrincipal GetActingPrincipal()
