@@ -8,7 +8,7 @@ This document defines the multi-protocol communication contracts exposed by the 
 
 | Protocol | Port | Transport / Encoding | Primary Responsibility | Authentication |
 |---|---|---|---|---|
-| **HTTPS REST API** | `5001` / `443` | HTTP/1.1 or HTTP/2, JSON | Admin UI, Account Deposits, Gamers, Configuration Sync | JWT Bearer / Custom Session Header |
+| **HTTPS REST API** | `5001` / `443` | HTTP/1.1 or HTTP/2, JSON | Admin UI, Account Deposits, Gamers, Configuration Sync, Software Updates | JWT Bearer / Custom Session Header |
 | **TCP Socket Server** | `37021` | TLS 1.3, Custom Frame | Persistent client socket, Heartbeats, Remote Commands, Telemetry | Session Challenge-Response + HMAC-SHA256 |
 | **UDP Discovery Server** | `37020` | UDP Broadcast, JSON | Local LAN Server Discovery | RSA-2048 Digital Signature |
 
@@ -33,6 +33,15 @@ This document defines the multi-protocol communication contracts exposed by the 
   * **Behavior**: Resolves workstation context from `UserPrincipal.PcId`. Returns `304 Not Modified` with ETag if unchanged, safe JSON patch delta package if valid, or full configuration package if missing/stale.
 * `GET /api/config/workstations/{workstationId}/effective`: Query effective resolved configuration with field trace sources.
 * `POST /api/config/publications`: Administrative configuration lifecycle endpoints (Prepare, Publish, Activate, Revoke, Rollback).
+
+### 2.4. Update & Software Distribution Platform (`/api/updates`)
+* `GET /api/updates/manifest`: Server-authoritative update discovery and manifest generation. Returns `200 OK` with JSON `ClientUpdateManifestContract`, `204 No Content` if up-to-date/outside rollout, or status codes (401/403/404) on identity/tenant errors.
+* `GET /api/updates/download/{packageId}`: Secure streaming download & partial range resume API supporting full HTTP downloads (`200 OK`) and HTTP `Range` requests (`206 Partial Content` / `416 Range Not Satisfiable`).
+* `POST /api/updates/releases`: Administrative release management (Create, Update Metadata, Prepare, Publish, Activate, Revoke, Rollback).
+* `POST /api/updates/releases/{releaseId}/packages/upload`: Upload update artifact package (`spk`, `zip`) with container validation and streaming SHA-256 calculation.
+* `POST /api/updates/packages/{packageId}/sign`: RSA-SHA256 digital signing endpoint.
+* `POST /api/updates/targets`: Multi-tier targeting and staged rollout administration (`GLOBAL`, `SITE`, `GROUP`, `WORKSTATION`).
+* `GET /api/updates/operations/status`: Subsystem operational status, storage/signing health probes, and OpenTelemetry metrics summary.
 
 ---
 

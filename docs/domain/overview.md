@@ -15,6 +15,7 @@ The domain layer (`Sayra.Backend.Domain`) contains pure domain logic, entities, 
 4. **GamerAccount (`GamerAccount`) & FinancialTransaction (`FinancialTransaction`)**: Financial double-entry ledger maintaining account balance, deposit history, usage debits, and compensation reversals.
 5. **ConfigurationPackage (`ConfigurationPackage`) & ConfigurationTarget (`ConfigurationTarget`)**: Configuration control plane managing JSON schema validation, deterministic canonical normalization, versioning, JSON patch delta generation, RSA-SHA256 signatures, targeting, and publications.
 6. **RemoteCommand (`RemoteCommand`)**: Command delivery aggregate root enforcing state machine transitions (`CREATED` ➔ `QUEUED` ➔ `SENDING` ➔ `DELIVERED` / `ACKNOWLEDGED` ➔ `EXECUTING` ➔ `SUCCEEDED` / `FAILED` / `EXPIRED`).
+7. **UpdateRelease (`UpdateRelease`), UpdatePackage (`UpdatePackage`) & UpdateTarget (`UpdateTarget`)**: Software distribution platform managing update release state transitions (`Draft` ➔ `Validated` ➔ `Ready` ➔ `Published` ➔ `Active` / `Superseded` / `Revoked`), zip/spk container validation, SHA-256 integrity, RSA-SHA256 digital signatures, multi-tier targeting, and staged rollout bucketing.
 
 ---
 
@@ -43,3 +44,16 @@ The domain layer (`Sayra.Backend.Domain`) contains pure domain logic, entities, 
   * **Same Target**: Selects the package with the highest `VersionNumber`.
   * **Multi-Group**: Sorts assigned groups deterministically by `Code` ascending, then `Id`.
   * **JSON Merging**: Deep recursive object merging, scalar replacement, explicit null overrides, and complete array replacements.
+
+### 2.5. Update & Software Distribution Platform Rules
+* **Release State Machine**:
+  `Draft` ➔ `Validated` ➔ `Ready` ➔ `Published` ➔ `Active` (or `Superseded` / `Revoked`).
+  Published and Active releases are strictly immutable.
+* **Package Integrity & Digital Signing**: Every update artifact requires container magic byte validation, streaming SHA-256 calculation, and Base64 RSA-SHA256 digital signing before publication. TOCTOU checks verify storage hash equality prior to release state promotion.
+* **Targeting Precedence & Staged Rollout**:
+  Evaluates scope precedence ($\text{Workstation} > \text{Group} > \text{Site} > \text{Global}$).
+  Applies deterministic rollout bucketing:
+  $$\text{Bucket} = \text{SHA256}(\text{PcId} + \text{ReleaseId}) \pmod{100}$$
+  Monotonic expansion guarantees that increasing rollout percentages never eject previously eligible client workstations.
+* **Secure Resumable Streaming**:
+  Download API supports HTTP `200 OK` (full download) and HTTP `206 Partial Content` / `416 Range Not Satisfiable` (Range requests). Content streaming uses bounded 64 KB memory buffers ($O(1)$ memory usage) with `ETag` checksums and sanitized filename headers.
