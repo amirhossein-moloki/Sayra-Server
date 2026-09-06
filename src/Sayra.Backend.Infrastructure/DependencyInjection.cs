@@ -249,6 +249,9 @@ namespace Sayra.Backend.Infrastructure
             // Update Manifest & Discovery Service (Stage 07-07)
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateManifestService, Sayra.Backend.Application.Updates.UpdateManifestService>();
 
+            // Update Secure Streaming Download & Resume Service (Stage 07-08)
+            services.AddScoped<Sayra.Backend.Application.Updates.IUpdateDownloadService, Sayra.Backend.Application.Updates.UpdateDownloadService>();
+
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.ValidateUpdatePackageCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdatePackageQuery, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.GetUpdatePackageQueryHandler>();
