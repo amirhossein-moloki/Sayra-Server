@@ -39,6 +39,48 @@ namespace Sayra.Backend.Contracts
         public string StorageKey { get; set; } = string.Empty;
     }
 
+    public class ClientUpdateReleaseContract
+    {
+        public Guid ReleaseId { get; set; }
+        public Guid OrganizationId { get; set; }
+        public string Version { get; set; } = string.Empty;
+        public string ReleaseType { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? ReleaseNotes { get; set; }
+        public string CreatedBy { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public DateTime? RevokedAt { get; set; }
+        public DateTime? SupersededAt { get; set; }
+        public string? Metadata { get; set; }
+        public ClientUpdatePackageMetadataContract? Package { get; set; }
+    }
+
+    public class CreateUpdateReleaseRequest
+    {
+        public string Version { get; set; } = string.Empty;
+        public string ReleaseType { get; set; } = "Standard";
+        public string? ReleaseNotes { get; set; }
+        public string? Metadata { get; set; }
+    }
+
+    public class UpdateReleaseMetadataRequest
+    {
+        public string? ReleaseNotes { get; set; }
+        public string? Metadata { get; set; }
+    }
+
+    public class RevokeUpdateReleaseRequest
+    {
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class RollbackUpdateReleaseRequest
+    {
+        public Guid TargetReleaseId { get; set; }
+        public string Reason { get; set; } = string.Empty;
+    }
+
     public static class ClientUpdateProtocolConstants
     {
         public const string ManifestRoute = "/api/updates/manifest";

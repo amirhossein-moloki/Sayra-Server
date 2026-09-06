@@ -68,6 +68,33 @@ namespace Sayra.Backend.Application.Updates
             };
         }
 
+        public static ClientUpdateReleaseContract ToReleaseContract(UpdateRelease release)
+        {
+            if (release == null)
+            {
+                throw new ArgumentNullException(nameof(release));
+            }
+
+            var firstPackage = release.Packages.FirstOrDefault();
+
+            return new ClientUpdateReleaseContract
+            {
+                ReleaseId = release.Id,
+                OrganizationId = release.OrganizationId,
+                Version = release.Version,
+                ReleaseType = release.ReleaseType.ToString(),
+                Status = release.Status.ToString(),
+                ReleaseNotes = release.ReleaseNotes,
+                CreatedBy = release.CreatedBy,
+                CreatedAt = release.CreatedAt,
+                PublishedAt = release.PublishedAt,
+                RevokedAt = release.RevokedAt,
+                SupersededAt = release.SupersededAt,
+                Metadata = release.Metadata,
+                Package = firstPackage != null ? ToPackageMetadataContract(firstPackage) : null
+            };
+        }
+
         public static UpdateManifest ToLegacyManifest(ClientUpdateManifestContract manifestContract)
         {
             if (manifestContract == null)

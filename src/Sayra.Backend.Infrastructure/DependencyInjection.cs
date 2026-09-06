@@ -249,6 +249,18 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.SignUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.SignUpdatePackageCommandHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.VerifyUpdatePackageSignatureQuery, Sayra.Backend.Application.Updates.UpdateSignatureVerificationResult>, Sayra.Backend.Application.Updates.VerifyUpdatePackageSignatureQueryHandler>();
 
+            // Update Release Lifecycle & Rollback Command & Query Handlers (Stage 07-05)
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.CreateUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.CreateUpdateReleaseCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UpdateReleaseMetadataCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.UpdateReleaseMetadataCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.PrepareUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.PrepareUpdateReleaseCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.PublishUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.PublishUpdateReleaseCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ActivateUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.ActivateUpdateReleaseCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.RevokeUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.RevokeUpdateReleaseCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.RollbackUpdateReleaseCommand, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.RollbackUpdateReleaseCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQuery, System.Collections.Generic.IReadOnlyList<ClientUpdateReleaseContract>>, Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQueryHandler>();
+
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationDeltaEngine, Sayra.Backend.Application.Configuration.ConfigurationDeltaEngine>();
