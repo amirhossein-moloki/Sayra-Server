@@ -30,7 +30,8 @@ namespace Sayra.Backend.Domain
                 UpdateReleaseStatus.Active => newState is UpdateReleaseStatus.Superseded
                                                        or UpdateReleaseStatus.Revoked,
 
-                UpdateReleaseStatus.Superseded => newState is UpdateReleaseStatus.Revoked,
+                UpdateReleaseStatus.Superseded => newState is UpdateReleaseStatus.Active
+                                                           or UpdateReleaseStatus.Revoked,
 
                 UpdateReleaseStatus.Revoked => false,   // Terminal state
                 UpdateReleaseStatus.Cancelled => false, // Terminal state
