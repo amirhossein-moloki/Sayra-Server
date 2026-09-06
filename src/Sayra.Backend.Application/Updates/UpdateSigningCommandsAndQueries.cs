@@ -37,6 +37,7 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateSigningService _signingService;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
         public SignUpdatePackageCommandHandler(
             IUpdatePackageRepository packageRepository,
@@ -46,7 +47,8 @@ namespace Sayra.Backend.Application.Updates
             IUpdateHashService hashService,
             IUpdateSigningService signingService,
             IAuthorizationService authorizationService,
-            ISecurityEventService securityEventService)
+            ISecurityEventService securityEventService,
+            IUpdateMetrics? updateMetrics = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
@@ -56,6 +58,7 @@ namespace Sayra.Backend.Application.Updates
             _signingService = signingService ?? throw new ArgumentNullException(nameof(signingService));
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdatePackageMetadataContract>> HandleAsync(SignUpdatePackageCommand command, CancellationToken cancellationToken = default)
@@ -170,6 +173,8 @@ namespace Sayra.Backend.Application.Updates
                     result: "SUCCESS",
                     failureReason: null,
                     cancellationToken: cancellationToken);
+
+                _updateMetrics?.RecordPackageOperation("sign", "success");
 
                 var metadata = ClientUpdateContractAdapter.ToPackageMetadataContract(package);
                 return Result<ClientUpdatePackageMetadataContract>.Success(metadata);

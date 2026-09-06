@@ -21,6 +21,7 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateEligibilityService _eligibilityService;
         private readonly IUpdateArtifactStorage _storage;
         private readonly ISecurityEventService? _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
         private readonly ILogger<UpdateDownloadService> _logger;
 
         public UpdateDownloadService(
@@ -30,7 +31,8 @@ namespace Sayra.Backend.Application.Updates
             IUpdateEligibilityService eligibilityService,
             IUpdateArtifactStorage storage,
             ILogger<UpdateDownloadService> logger,
-            ISecurityEventService? securityEventService = null)
+            ISecurityEventService? securityEventService = null,
+            IUpdateMetrics? updateMetrics = null)
         {
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
@@ -39,12 +41,15 @@ namespace Sayra.Backend.Application.Updates
             _storage = storage ?? throw new ArgumentNullException(nameof(storage));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _securityEventService = securityEventService;
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<UpdateDownloadPreparation> PrepareDownloadAsync(
             UpdateDownloadRequest request,
             CancellationToken cancellationToken = default)
         {
+            using var activity = _updateMetrics?.StartActivity("Update.Download.Authorization");
+
             if (request == null)
             {
                 throw new ArgumentNullException(nameof(request));
@@ -53,6 +58,7 @@ namespace Sayra.Backend.Application.Updates
             if (request.Principal == null || !request.Principal.IsAuthenticated)
             {
                 _logger.LogWarning("UPDATE_DOWNLOAD_REJECTED: Unauthenticated download request for package '{PackageId}'.", request.PackageId);
+                _updateMetrics?.RecordDownloadFailed("unauthorized", "none");
                 return UpdateDownloadPreparation.Failure(401, "UNAUTHORIZED", "Authentication is required to download update packages.");
             }
 
@@ -203,6 +209,8 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_DOWNLOAD_INVALID_RANGE: Workstation '{PcId}' requested unsatisfiable range '{Range}' for artifact size {Size}.",
                     workstation.PcId, request.RangeHeader, servedTotalSize);
+
+                _updateMetrics?.RecordDownloadInvalidRange();
 
                 if (_securityEventService != null)
                 {
