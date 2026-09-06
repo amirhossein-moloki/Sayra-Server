@@ -1,0 +1,3 @@
+## 2025-09-06 - Pre-compiled Regex in Domain Entity Validation
+**Learning:** Instantiating `new Regex(...)` inside frequently executed domain normalization/validation methods (like `Workstation.NormalizeAndValidate()`) creates unnecessary Regex objects, parses regex patterns, and triggers heap allocations on every call. Using a `private static readonly Regex` compiled with `RegexOptions.Compiled` at class initialization eliminates per-invocation regex compilation and heap allocations while preserving thread safety.
+**Action:** Always check domain entities and validation routines for inline `new Regex(...)` calls and hoist them to `private static readonly Regex` instances with `RegexOptions.Compiled`.
