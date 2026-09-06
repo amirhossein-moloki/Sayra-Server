@@ -18,10 +18,12 @@ namespace Sayra.Backend.Api.Controllers
     {
         private const int StreamBufferSize = 65536; // 64 KB buffer
         private readonly IUpdateDownloadService _downloadService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
-        public UpdateDownloadController(IUpdateDownloadService downloadService)
+        public UpdateDownloadController(IUpdateDownloadService downloadService, IUpdateMetrics? updateMetrics = null)
         {
             _downloadService = downloadService ?? throw new ArgumentNullException(nameof(downloadService));
+            _updateMetrics = updateMetrics;
         }
 
         [HttpGet("{packageId:guid}")]
@@ -104,29 +106,46 @@ namespace Sayra.Backend.Api.Controllers
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, HttpContext.RequestAborted);
             var activeToken = linkedCts.Token;
 
-            if (preparation.Range.IsRangeRequest)
-            {
-                Response.StatusCode = StatusCodes.Status206PartialContent;
-                Response.Headers["Content-Range"] = preparation.Range.ContentRangeHeader;
-                Response.ContentLength = preparation.Range.ServedLength;
+            string rangeMode = preparation.Range.IsRangeRequest ? "range" : "full";
+            long targetLength = preparation.Range.IsRangeRequest ? preparation.Range.ServedLength : preparation.TotalSize;
 
-                await StreamBytesAsync(preparation.ContentStream, Response.Body, preparation.Range.ServedLength, activeToken);
+            _updateMetrics?.RecordDownloadStarted(rangeMode);
+
+            try
+            {
+                if (preparation.Range.IsRangeRequest)
+                {
+                    Response.StatusCode = StatusCodes.Status206PartialContent;
+                    Response.Headers["Content-Range"] = preparation.Range.ContentRangeHeader;
+                    Response.ContentLength = targetLength;
+                }
+                else
+                {
+                    Response.StatusCode = StatusCodes.Status200OK;
+                    Response.ContentLength = targetLength;
+                }
+
+                long bytesWritten = await StreamBytesAsync(preparation.ContentStream, Response.Body, targetLength, activeToken);
+                _updateMetrics?.RecordDownloadCompleted(rangeMode, bytesWritten);
                 return new EmptyResult();
             }
-            else
+            catch (OperationCanceledException)
             {
-                Response.StatusCode = StatusCodes.Status200OK;
-                Response.ContentLength = preparation.TotalSize;
-
-                await StreamBytesAsync(preparation.ContentStream, Response.Body, preparation.TotalSize, activeToken);
-                return new EmptyResult();
+                _updateMetrics?.RecordDownloadCancelled(rangeMode);
+                throw;
+            }
+            catch (Exception)
+            {
+                _updateMetrics?.RecordDownloadFailed("stream_write_error", rangeMode);
+                throw;
             }
         }
 
-        private static async Task StreamBytesAsync(Stream sourceStream, Stream destinationStream, long bytesToStream, CancellationToken cancellationToken)
+        private static async Task<long> StreamBytesAsync(Stream sourceStream, Stream destinationStream, long bytesToStream, CancellationToken cancellationToken)
         {
             byte[] buffer = new byte[StreamBufferSize];
             long bytesRemaining = bytesToStream;
+            long totalRead = 0;
 
             while (bytesRemaining > 0)
             {
@@ -142,9 +161,11 @@ namespace Sayra.Backend.Api.Controllers
 
                 await destinationStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
                 bytesRemaining -= bytesRead;
+                totalRead += bytesRead;
             }
 
             await destinationStream.FlushAsync(cancellationToken);
+            return totalRead;
         }
 
         private static string SanitizeFileName(string original)

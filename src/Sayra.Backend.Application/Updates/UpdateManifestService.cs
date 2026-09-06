@@ -17,24 +17,29 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateEligibilityService _eligibilityService;
         private readonly IRepository<Workstation> _workstationRepository;
         private readonly ISecurityEventService? _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
         private readonly ILogger<UpdateManifestService> _logger;
 
         public UpdateManifestService(
             IUpdateEligibilityService eligibilityService,
             IRepository<Workstation> workstationRepository,
             ILogger<UpdateManifestService> logger,
-            ISecurityEventService? securityEventService = null)
+            ISecurityEventService? securityEventService = null,
+            IUpdateMetrics? updateMetrics = null)
         {
             _eligibilityService = eligibilityService ?? throw new ArgumentNullException(nameof(eligibilityService));
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _securityEventService = securityEventService;
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<UpdateManifestResult> GetManifestAsync(
             UpdateManifestRequest request,
             CancellationToken cancellationToken = default)
         {
+            using var activity = _updateMetrics?.StartActivity("Update.Manifest");
+
             if (request == null)
             {
                 throw new ArgumentNullException(nameof(request));
@@ -43,6 +48,7 @@ namespace Sayra.Backend.Application.Updates
             if (request.Principal == null || !request.Principal.IsAuthenticated)
             {
                 _logger.LogWarning("UPDATE_MANIFEST_REJECTED: Unauthenticated request received.");
+                _updateMetrics?.RecordManifestRequest("unauthorized", "UNAUTHORIZED");
                 return UpdateManifestResult.NotAvailable("UNAUTHORIZED", "Authentication is required to request update manifest.");
             }
 
@@ -70,6 +76,7 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_MANIFEST_REJECTED: Workstation identity could not be resolved for principal (PcId: {PcId}, UserId: {UserId}).",
                     request.Principal.PcId, request.Principal.UserId);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.WorkstationNotFound);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.WorkstationNotFound, "Bound workstation identity was not found.");
             }
 
@@ -77,12 +84,14 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_MANIFEST_REJECTED: Workstation '{PcId}' ({WorkstationId}) is disabled or deactivated.",
                     workstation.PcId, workstation.Id);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.WorkstationDeactivated);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.WorkstationDeactivated, $"Workstation '{workstation.PcId}' is disabled or deactivated.");
             }
 
             if (!workstation.OrganizationEntityId.HasValue || workstation.OrganizationEntityId.Value == Guid.Empty)
             {
                 _logger.LogWarning("UPDATE_MANIFEST_REJECTED: Workstation '{PcId}' is not assigned to an organization.", workstation.PcId);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.OrganizationMismatch);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.OrganizationMismatch, $"Workstation '{workstation.PcId}' is not assigned to an organization.");
             }
 
@@ -93,6 +102,7 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_MANIFEST_REJECTED: Organization boundary mismatch for workstation '{PcId}' (Principal Org: {PrincipalOrg}, Workstation Org: {WorkstationOrg}).",
                     workstation.PcId, request.Principal.OrganizationId, workstation.OrganizationEntityId);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.OrganizationMismatch);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.OrganizationMismatch, "Cross-organization access is strictly forbidden.");
             }
 
@@ -114,7 +124,9 @@ namespace Sayra.Backend.Application.Updates
                 _logger.LogInformation("UPDATE_MANIFEST_NOT_AVAILABLE: Workstation '{PcId}' is not eligible for update. ReasonCode: {ReasonCode}, Details: {Details}",
                     workstation.PcId, eligibility.ReasonCode, eligibility.ReasonDetails);
 
-                return UpdateManifestResult.NotAvailable(eligibility.ReasonCode, eligibility.ReasonDetails);
+                string reasonCode = eligibility.ReasonCode ?? "NOT_ELIGIBLE";
+                _updateMetrics?.RecordManifestRequest("unavailable", reasonCode);
+                return UpdateManifestResult.NotAvailable(reasonCode, eligibility.ReasonDetails);
             }
 
             // 3. Defense-In-Depth Precondition Validation
@@ -125,6 +137,7 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogError("UPDATE_MANIFEST_REJECTED: Selected release Org '{ReleaseOrg}' does not match workstation Org '{WorkstationOrg}'.",
                     releaseContract.OrganizationId, organizationId);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.OrganizationMismatch);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.OrganizationMismatch, "Selected release organization mismatch.");
             }
 
@@ -133,6 +146,7 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_MANIFEST_NOT_AVAILABLE: Selected release '{Version}' status is '{Status}', not Published or Active.",
                     releaseContract.Version, releaseContract.Status);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.ReleaseNotActive);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.ReleaseNotActive, $"Release '{releaseContract.Version}' is not active or published.");
             }
 
@@ -140,6 +154,7 @@ namespace Sayra.Backend.Application.Updates
             {
                 _logger.LogWarning("UPDATE_MANIFEST_NOT_AVAILABLE: Selected package '{PackageId}' for release '{Version}' is missing checksum or RSA signature.",
                     packageContract.PackageId, releaseContract.Version);
+                _updateMetrics?.RecordManifestRequest("unavailable", EligibilityReasonCodes.SignatureInvalid);
                 return UpdateManifestResult.NotAvailable(EligibilityReasonCodes.SignatureInvalid, "Package checksum or signature is invalid.");
             }
 
@@ -164,6 +179,8 @@ namespace Sayra.Backend.Application.Updates
 
             _logger.LogInformation("UPDATE_MANIFEST_AVAILABLE: Update manifest generated for Workstation '{PcId}' -> Release '{Version}', PackageId: {PackageId}, Mandatory: {Mandatory}",
                 workstation.PcId, manifestContract.Version, packageContract.PackageId, manifestContract.IsMandatory);
+
+            _updateMetrics?.RecordManifestRequest("available", "none");
 
             if (_securityEventService != null)
             {

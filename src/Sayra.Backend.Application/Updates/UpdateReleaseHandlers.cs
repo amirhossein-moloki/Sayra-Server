@@ -22,17 +22,20 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUnitOfWork _unitOfWork;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
         public CreateUpdateReleaseCommandHandler(
             IUpdateReleaseRepository releaseRepository,
             IUnitOfWork unitOfWork,
             IAuthorizationService authorizationService,
-            ISecurityEventService securityEventService)
+            ISecurityEventService securityEventService,
+            IUpdateMetrics? updateMetrics = null)
         {
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdateReleaseContract>> HandleAsync(CreateUpdateReleaseCommand command, CancellationToken cancellationToken = default)
@@ -105,6 +108,8 @@ namespace Sayra.Backend.Application.Updates
                     result: "SUCCESS",
                     failureReason: null,
                     cancellationToken: cancellationToken);
+
+                _updateMetrics?.RecordReleaseOperation("create", "success");
 
                 var contract = ClientUpdateContractAdapter.ToReleaseContract(release);
                 return Result<ClientUpdateReleaseContract>.Success(contract);
@@ -375,6 +380,7 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateHashService _hashService;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
         public PublishUpdateReleaseCommandHandler(
             IUpdateReleaseRepository releaseRepository,
@@ -382,7 +388,8 @@ namespace Sayra.Backend.Application.Updates
             IUpdateArtifactStorage storage,
             IUpdateHashService hashService,
             IAuthorizationService authorizationService,
-            ISecurityEventService securityEventService)
+            ISecurityEventService securityEventService,
+            IUpdateMetrics? updateMetrics = null)
         {
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -390,6 +397,7 @@ namespace Sayra.Backend.Application.Updates
             _hashService = hashService ?? throw new ArgumentNullException(nameof(hashService));
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdateReleaseContract>> HandleAsync(PublishUpdateReleaseCommand command, CancellationToken cancellationToken = default)
@@ -508,6 +516,8 @@ namespace Sayra.Backend.Application.Updates
                     result: "SUCCESS",
                     failureReason: null,
                     cancellationToken: cancellationToken);
+
+                _updateMetrics?.RecordReleaseOperation("publish", "success");
 
                 return Result<ClientUpdateReleaseContract>.Success(ClientUpdateContractAdapter.ToReleaseContract(release));
             }
@@ -647,17 +657,20 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUnitOfWork _unitOfWork;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
         public RevokeUpdateReleaseCommandHandler(
             IUpdateReleaseRepository releaseRepository,
             IUnitOfWork unitOfWork,
             IAuthorizationService authorizationService,
-            ISecurityEventService securityEventService)
+            ISecurityEventService securityEventService,
+            IUpdateMetrics? updateMetrics = null)
         {
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdateReleaseContract>> HandleAsync(RevokeUpdateReleaseCommand command, CancellationToken cancellationToken = default)
@@ -728,6 +741,8 @@ namespace Sayra.Backend.Application.Updates
                     failureReason: string.IsNullOrWhiteSpace(command.Reason) ? "Emergency Administrative Revocation" : command.Reason.Trim(),
                     cancellationToken: cancellationToken);
 
+                _updateMetrics?.RecordReleaseOperation("revoke", "success");
+
                 return Result<ClientUpdateReleaseContract>.Success(ClientUpdateContractAdapter.ToReleaseContract(release));
             }
             catch (InvalidDomainException ex)
@@ -749,6 +764,7 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateHashService _hashService;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
 
         public RollbackUpdateReleaseCommandHandler(
             IUpdateReleaseRepository releaseRepository,
@@ -756,7 +772,8 @@ namespace Sayra.Backend.Application.Updates
             IUpdateArtifactStorage storage,
             IUpdateHashService hashService,
             IAuthorizationService authorizationService,
-            ISecurityEventService securityEventService)
+            ISecurityEventService securityEventService,
+            IUpdateMetrics? updateMetrics = null)
         {
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -764,6 +781,7 @@ namespace Sayra.Backend.Application.Updates
             _hashService = hashService ?? throw new ArgumentNullException(nameof(hashService));
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdateReleaseContract>> HandleAsync(RollbackUpdateReleaseCommand command, CancellationToken cancellationToken = default)
@@ -907,6 +925,8 @@ namespace Sayra.Backend.Application.Updates
                     result: "SUCCESS",
                     failureReason: null,
                     cancellationToken: cancellationToken);
+
+                _updateMetrics?.RecordReleaseOperation("rollback", "success");
 
                 return Result<ClientUpdateReleaseContract>.Success(ClientUpdateContractAdapter.ToReleaseContract(targetRelease));
             }

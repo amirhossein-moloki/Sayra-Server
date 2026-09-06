@@ -26,6 +26,7 @@ namespace Sayra.Backend.Application.Updates
         private readonly IUpdateHashService _hashService;
         private readonly IAuthorizationService _authorizationService;
         private readonly ISecurityEventService _securityEventService;
+        private readonly IUpdateMetrics? _updateMetrics;
         private readonly ILogger<UploadUpdatePackageCommandHandler> _logger;
 
         public UploadUpdatePackageCommandHandler(
@@ -37,7 +38,8 @@ namespace Sayra.Backend.Application.Updates
             IUpdateHashService hashService,
             IAuthorizationService authorizationService,
             ISecurityEventService securityEventService,
-            ILogger<UploadUpdatePackageCommandHandler> logger)
+            ILogger<UploadUpdatePackageCommandHandler> logger,
+            IUpdateMetrics? updateMetrics = null)
         {
             _releaseRepository = releaseRepository ?? throw new ArgumentNullException(nameof(releaseRepository));
             _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
@@ -48,6 +50,7 @@ namespace Sayra.Backend.Application.Updates
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _updateMetrics = updateMetrics;
         }
 
         public async Task<Result<ClientUpdatePackageMetadataContract>> HandleAsync(UploadUpdatePackageCommand command, CancellationToken cancellationToken)
@@ -131,6 +134,8 @@ namespace Sayra.Backend.Application.Updates
                             failureReason: validationResult.ErrorMessage,
                             cancellationToken: cancellationToken);
 
+                        _updateMetrics?.RecordPackageOperation("quarantine", "quarantined", validationResult.ErrorCode ?? "SECURITY_VIOLATION");
+
                         return Result<ClientUpdatePackageMetadataContract>.Failure("PACKAGE_QUARANTINED", $"Package quarantined due to security violation: {validationResult.ErrorMessage}");
                     }
 
@@ -186,6 +191,8 @@ namespace Sayra.Backend.Application.Updates
                     result: "SUCCESS",
                     failureReason: null,
                     cancellationToken: cancellationToken);
+
+                _updateMetrics?.RecordPackageOperation("upload_and_validate", "success");
 
                 var metadata = ClientUpdateContractAdapter.ToPackageMetadataContract(package);
                 return Result<ClientUpdatePackageMetadataContract>.Success(metadata);

@@ -250,6 +250,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateManifestService, Sayra.Backend.Application.Updates.UpdateManifestService>();
 
             // Update Secure Streaming Download & Resume Service (Stage 07-08)
+            services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateMetrics, Sayra.Backend.Infrastructure.Updates.UpdateMetrics>();
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateDownloadService, Sayra.Backend.Application.Updates.UpdateDownloadService>();
 
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
@@ -270,6 +271,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQuery, System.Collections.Generic.IReadOnlyList<ClientUpdateReleaseContract>>, Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateOperationalStatusQuery, Sayra.Backend.Application.Updates.UpdateOperationalStatusDto>, Sayra.Backend.Application.Updates.GetUpdateOperationalStatusQueryHandler>();
 
             // Update Targeting & Eligibility Handlers (Stage 07-06)
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.CreateUpdateTargetCommand, Sayra.Backend.Application.Updates.UpdateTargetContract>, Sayra.Backend.Application.Updates.CreateUpdateTargetCommandHandler>();
@@ -365,7 +367,15 @@ namespace Sayra.Backend.Infrastructure
                 .AddCheck<TcpServerHealthCheck>(
                     name: "TcpServer",
                     failureStatus: HealthStatus.Unhealthy,
-                    tags: new[] { "ready" });
+                    tags: new[] { "ready" })
+                .AddCheck<UpdateStorageHealthCheck>(
+                    name: "UpdateStorage",
+                    failureStatus: HealthStatus.Unhealthy,
+                    tags: new[] { "ready", "updates" })
+                .AddCheck<UpdateSigningHealthCheck>(
+                    name: "UpdateSigning",
+                    failureStatus: HealthStatus.Unhealthy,
+                    tags: new[] { "ready", "updates" });
 
             return services;
         }
