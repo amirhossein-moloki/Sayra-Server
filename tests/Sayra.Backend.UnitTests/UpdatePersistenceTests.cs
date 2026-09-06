@@ -74,5 +74,35 @@ namespace Sayra.Backend.UnitTests
             Assert.Equal("v1.0.0", activeRelease!.Version);
             Assert.Equal(UpdateReleaseStatus.Active, activeRelease.Status);
         }
+
+        [Fact]
+        public async Task UpdateTargetRepository_AddAndRetrieveApplicableTargets_Succeeds()
+        {
+            using var context = CreateInMemoryDbContext();
+            var targetRepo = new UpdateTargetRepository(context);
+            var releaseRepo = new UpdateReleaseRepository(context);
+
+            var orgId = Guid.NewGuid();
+            var siteId = Guid.NewGuid();
+            var groupId = Guid.NewGuid();
+            var workstationId = Guid.NewGuid();
+
+            var release = UpdateRelease.Create(orgId, "v2.0.0");
+            var globalTarget = UpdateTarget.CreateGlobal(orgId, release.Id, 100);
+            var siteTarget = UpdateTarget.CreateSite(orgId, release.Id, siteId, 50);
+
+            await releaseRepo.AddAsync(release);
+            await targetRepo.AddAsync(globalTarget);
+            await targetRepo.AddAsync(siteTarget);
+            await context.SaveChangesAsync();
+
+            var targetsForRelease = await targetRepo.GetByReleaseIdAsync(release.Id);
+            Assert.Equal(2, targetsForRelease.Count);
+
+            var applicableTargets = await targetRepo.GetApplicableTargetsAsync(
+                orgId, siteId, new[] { groupId }, workstationId);
+
+            Assert.Equal(2, applicableTargets.Count);
+        }
     }
 }

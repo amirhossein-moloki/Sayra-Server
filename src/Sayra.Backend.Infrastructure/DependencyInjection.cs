@@ -232,6 +232,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IConfigurationAssignmentRepository, ConfigurationAssignmentRepository>();
             services.AddScoped<IUpdateReleaseRepository, UpdateReleaseRepository>();
             services.AddScoped<IUpdatePackageRepository, UpdatePackageRepository>();
+            services.AddScoped<IUpdateTargetRepository, UpdateTargetRepository>();
 
             // Update Artifact Ingestion, Storage & Package Validation Services
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateArtifactStorage, Sayra.Backend.Infrastructure.Updates.LocalUpdateArtifactStorage>();
@@ -241,6 +242,9 @@ namespace Sayra.Backend.Infrastructure
             // Update Cryptographic Signing Infrastructure (Stage 07-04)
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateSigningKeyProvider, Sayra.Backend.Infrastructure.Updates.UpdateSigningKeyProvider>();
             services.AddScoped<Sayra.Backend.Application.Updates.IUpdateSigningService, Sayra.Backend.Application.Updates.UpdateSigningService>();
+
+            // Update Eligibility & Staged Rollout Decision Engine (Stage 07-06)
+            services.AddScoped<Sayra.Backend.Application.Updates.IUpdateEligibilityService, Sayra.Backend.Application.Updates.UpdateEligibilityService>();
 
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UploadUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.UploadUpdatePackageCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.ValidateUpdatePackageCommand, ClientUpdatePackageMetadataContract>, Sayra.Backend.Application.Updates.ValidateUpdatePackageCommandHandler>();
@@ -260,6 +264,15 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetUpdateReleaseByIdQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQuery, System.Collections.Generic.IReadOnlyList<ClientUpdateReleaseContract>>, Sayra.Backend.Application.Updates.GetUpdateReleasesByOrganizationQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQuery, ClientUpdateReleaseContract>, Sayra.Backend.Application.Updates.GetActiveUpdateReleaseQueryHandler>();
+
+            // Update Targeting & Eligibility Handlers (Stage 07-06)
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.CreateUpdateTargetCommand, Sayra.Backend.Application.Updates.UpdateTargetContract>, Sayra.Backend.Application.Updates.CreateUpdateTargetCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.UpdateRolloutPercentageCommand, Sayra.Backend.Application.Updates.UpdateTargetContract>, Sayra.Backend.Application.Updates.UpdateRolloutPercentageCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.DisableUpdateTargetCommand, Sayra.Backend.Application.Updates.UpdateTargetContract>, Sayra.Backend.Application.Updates.DisableUpdateTargetCommandHandler>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.Updates.DeleteUpdateTargetCommand, bool>, Sayra.Backend.Application.Updates.DeleteUpdateTargetCommandHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateTargetsByReleaseQuery, System.Collections.Generic.IReadOnlyList<Sayra.Backend.Application.Updates.UpdateTargetContract>>, Sayra.Backend.Application.Updates.GetUpdateTargetsByReleaseQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.GetUpdateTargetsByOrganizationQuery, System.Collections.Generic.IReadOnlyList<Sayra.Backend.Application.Updates.UpdateTargetContract>>, Sayra.Backend.Application.Updates.GetUpdateTargetsByOrganizationQueryHandler>();
+            services.AddScoped<IQueryHandler<Sayra.Backend.Application.Updates.EvaluateWorkstationUpdateEligibilityQuery, Sayra.Backend.Application.Updates.UpdateEligibilityResult>, Sayra.Backend.Application.Updates.EvaluateWorkstationUpdateEligibilityQueryHandler>();
 
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationValidator, Sayra.Backend.Application.Configuration.ConfigurationValidatorService>();
             services.AddSingleton<Sayra.Backend.Application.Configuration.IConfigurationNormalizer, Sayra.Backend.Application.Configuration.ConfigurationNormalizer>();
