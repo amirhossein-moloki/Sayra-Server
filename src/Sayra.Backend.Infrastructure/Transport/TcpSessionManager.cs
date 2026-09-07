@@ -6,8 +6,10 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Transport;
+using Sayra.Backend.Application.Telemetry;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Events;
+using Sayra.Backend.Domain.ValueObjects;
 using Sayra.Backend.Infrastructure.Security;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -16,15 +18,26 @@ namespace Sayra.Backend.Infrastructure.Transport
     {
         private readonly ITcpConnectionRegistry _connectionRegistry;
         private readonly IRedisService _redisService;
+        private readonly IWorkstationStateStore? _stateStore;
         private readonly ILogger<TcpSessionManager> _logger;
 
         public TcpSessionManager(
             ITcpConnectionRegistry connectionRegistry,
             IRedisService redisService,
             ILogger<TcpSessionManager> logger)
+            : this(connectionRegistry, redisService, null, logger)
+        {
+        }
+
+        public TcpSessionManager(
+            ITcpConnectionRegistry connectionRegistry,
+            IRedisService redisService,
+            IWorkstationStateStore? stateStore,
+            ILogger<TcpSessionManager> logger)
         {
             _connectionRegistry = connectionRegistry ?? throw new ArgumentNullException(nameof(connectionRegistry));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
+            _stateStore = stateStore;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -92,10 +105,30 @@ namespace Sayra.Backend.Infrastructure.Transport
             if (newState is ConnectionLifecycleState.Authenticated or ConnectionLifecycleState.Active)
             {
                 await SyncRedisSessionAsync(connection, cancellationToken);
+                if (_stateStore != null && !string.IsNullOrWhiteSpace(connection.PcId))
+                {
+                    Guid? parsedWsId = Guid.TryParse(connection.PcId, out var id) ? id : null;
+                    await _stateStore.UpdateConnectionStateAsync(
+                        new WorkstationIdentity(connection.PcId, parsedWsId),
+                        connection.ConnectionId,
+                        isConnected: true,
+                        newState.ToString(),
+                        cancellationToken);
+                }
             }
             else if (newState == ConnectionLifecycleState.Disconnected)
             {
                 await RemoveRedisSessionAsync(connection.ConnectionId, cancellationToken);
+                if (_stateStore != null && !string.IsNullOrWhiteSpace(connection.PcId))
+                {
+                    Guid? parsedWsId = Guid.TryParse(connection.PcId, out var id) ? id : null;
+                    await _stateStore.UpdateConnectionStateAsync(
+                        new WorkstationIdentity(connection.PcId, parsedWsId),
+                        connection.ConnectionId,
+                        isConnected: false,
+                        newState.ToString(),
+                        cancellationToken);
+                }
             }
         }
 
@@ -141,6 +174,17 @@ namespace Sayra.Backend.Infrastructure.Transport
             _connectionRegistry.Unregister(connectionId);
 
             await RemoveRedisSessionAsync(connectionId, cancellationToken);
+
+            if (_stateStore != null && !string.IsNullOrWhiteSpace(pcId))
+            {
+                Guid? parsedWsId = Guid.TryParse(pcId, out var id) ? id : null;
+                await _stateStore.UpdateConnectionStateAsync(
+                    new WorkstationIdentity(pcId, parsedWsId),
+                    connectionId,
+                    isConnected: false,
+                    "Disconnected",
+                    cancellationToken);
+            }
 
             try
             {

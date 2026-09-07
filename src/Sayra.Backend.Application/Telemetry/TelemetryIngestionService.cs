@@ -14,15 +14,26 @@ namespace Sayra.Backend.Application.Telemetry
     {
         private readonly ISecurityEventService _securityEventService;
         private readonly ITelemetryIdempotencyService _idempotencyService;
+        private readonly IWorkstationStateStore? _stateStore;
         private readonly ILogger<TelemetryIngestionService> _logger;
 
         public TelemetryIngestionService(
             ISecurityEventService securityEventService,
             ITelemetryIdempotencyService idempotencyService,
             ILogger<TelemetryIngestionService> logger)
+            : this(securityEventService, idempotencyService, null, logger)
+        {
+        }
+
+        public TelemetryIngestionService(
+            ISecurityEventService securityEventService,
+            ITelemetryIdempotencyService idempotencyService,
+            IWorkstationStateStore? stateStore,
+            ILogger<TelemetryIngestionService> logger)
         {
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
             _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+            _stateStore = stateStore;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -224,6 +235,12 @@ namespace Sayra.Backend.Application.Telemetry
                 serverReceivedAt,
                 processedAt);
 
+            // Update Authoritative Real-Time Workstation State
+            if (_stateStore != null)
+            {
+                await _stateStore.UpdateFromTelemetryAsync(identity, snapshot, connectionContext.ConnectionId, cancellationToken);
+            }
+
             return TelemetryIngestionResult.AcceptedTelemetry(snapshot, serverReceivedAt, processedAt);
         }
 
@@ -364,6 +381,12 @@ namespace Sayra.Backend.Application.Telemetry
 
             await _idempotencyService.MarkEventProcessedAsync(eventDto.EventId, cancellationToken);
 
+            // Update Authoritative Real-Time Workstation State
+            if (_stateStore != null)
+            {
+                await _stateStore.UpdateFromOperationalEventAsync(identity, eventSignal, cancellationToken);
+            }
+
             return TelemetryIngestionResult.AcceptedEvent(eventSignal, serverReceivedAt, processedAt);
         }
 
@@ -438,6 +461,12 @@ namespace Sayra.Backend.Application.Telemetry
             }
 
             var heartbeatSignal = new HeartbeatSignal(identity, clientTs, serverReceivedAt, processedAt);
+
+            // Update Authoritative Real-Time Workstation State
+            if (_stateStore != null)
+            {
+                await _stateStore.UpdateFromHeartbeatAsync(identity, heartbeatSignal, connectionContext.ConnectionId, cancellationToken);
+            }
 
             return TelemetryIngestionResult.AcceptedHeartbeat(heartbeatSignal, serverReceivedAt, processedAt);
         }

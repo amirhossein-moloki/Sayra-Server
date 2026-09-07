@@ -9,6 +9,9 @@ namespace Sayra.Backend.Application.Abstractions.Caching
         public static string WorkstationStateKey(Guid workstationId) =>
             $"{VersionPrefix}:workstation:{workstationId:N}:state";
 
+        public static string WorkstationStateKeyByPcId(string pcId) =>
+            $"{VersionPrefix}:workstation:pcid:{(pcId ?? string.Empty).Trim().ToUpperInvariant()}:state";
+
         public static string ConnectionStateKey(Guid connectionId) =>
             $"{VersionPrefix}:connection:{connectionId:N}:state";
 
