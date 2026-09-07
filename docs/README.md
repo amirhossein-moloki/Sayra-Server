@@ -15,6 +15,7 @@ Welcome to the **SAYRA Central Backend** documentation knowledge base. This docu
 
 ### 2. 💼 [Domain Model & Business Rules](domain/overview.md)
 * **[Domain Overview & Invariants](domain/overview.md)**: Core domain concepts across Identity, Workstations, Sessions, Pricing, Billing, Reservations, Telemetry, and Configuration Control Plane. Enforces strict server-authoritative time, financial decimal representation, and database-level idempotency.
+* **[Telemetry Forensic & Compatibility Contract](domain/telemetry-forensic-contract.md)**: Forensic discovery and evidence-based telemetry, heartbeat, and operational event contract between SAYRA Client and Central Backend.
 
 ### 3. 🔐 [Security & Auditing](security/overview.md)
 * **[Security Architecture](security/overview.md)**: Network encryption (TLS 1.3), offline Local Root CA PKI, JWT & RBAC permission controls, resource-level authorization, anti-replay sliding windows, sequence tracking, and append-only hash-chained audit logging with sensitive pattern redaction.
