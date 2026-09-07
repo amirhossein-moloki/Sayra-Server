@@ -1,11 +1,12 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Telemetry;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Domain.Enums;
 using Sayra.Backend.Shared;
 
 namespace Sayra.Backend.Application.Events
@@ -17,77 +18,58 @@ namespace Sayra.Backend.Application.Events
 
     public class IngestClientEventCommandHandler : ICommandHandler<IngestClientEventCommand, bool>
     {
+        private readonly ITelemetryIngestionService _ingestionService;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly IUnitOfWork _unitOfWork;
-        private readonly IRedisService _redisService;
 
         public IngestClientEventCommandHandler(
+            ITelemetryIngestionService ingestionService,
             IRepository<AuditEvent> auditEventRepository,
-            IUnitOfWork unitOfWork,
-            IRedisService redisService)
+            IUnitOfWork unitOfWork)
         {
+            _ingestionService = ingestionService ?? throw new ArgumentNullException(nameof(ingestionService));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
         }
 
         public async Task<Result<bool>> HandleAsync(IngestClientEventCommand command, CancellationToken cancellationToken = default)
         {
             if (command == null || command.Event == null)
             {
-                return Result<bool>.Failure("Client event payload cannot be null.");
+                return Result<bool>.Failure("PayloadNull", "Client event payload cannot be null.");
             }
 
-            var evt = command.Event;
+            var context = new TelemetryConnectionContext(
+                connectionId: Guid.NewGuid().ToString(),
+                pcId: command.ConnectionPcId);
 
-            // Strict Validation
-            if (string.IsNullOrWhiteSpace(evt.EventId))
-            {
-                return Result<bool>.Failure("EventId is required.");
-            }
+            var ingestionResult = await _ingestionService.IngestOperationalEventAsync(context, command.Event, cancellationToken);
 
-            if (string.IsNullOrWhiteSpace(evt.EventType))
-            {
-                return Result<bool>.Failure("EventType is required.");
-            }
-
-            // Caller identity consistency verification
-            if (!string.IsNullOrEmpty(command.ConnectionPcId))
-            {
-                var connPcIdUpper = command.ConnectionPcId.Trim().ToUpperInvariant();
-
-                if (!string.IsNullOrEmpty(evt.ClientId) && !evt.ClientId.Trim().Equals(connPcIdUpper, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Result<bool>.Failure("ClientId does not match authenticated connection PC-ID.");
-                }
-
-                if (!string.IsNullOrEmpty(evt.WorkstationId) && !evt.WorkstationId.Trim().Equals(connPcIdUpper, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Result<bool>.Failure("WorkstationId does not match authenticated connection PC-ID.");
-                }
-            }
-
-            // Deduplication via Redis key (24 hour deduplication window)
-            string dedupKey = $"v1:event:dedup:{evt.EventId.Trim()}";
-            string? existingDedup = await _redisService.GetStringAsync(dedupKey, cancellationToken);
-            if (!string.IsNullOrEmpty(existingDedup))
+            if (ingestionResult.Status == TelemetryIngestionStatus.Duplicate)
             {
                 // Duplicate event safely ignored idempotently
                 return Result<bool>.Success(true);
             }
 
-            await _redisService.SetStringAsync(dedupKey, "PROCESSED", TimeSpan.FromHours(24), cancellationToken);
+            if (!ingestionResult.IsAccepted)
+            {
+                return Result<bool>.Failure(ingestionResult.RejectionReason.ToString(), ingestionResult.ErrorMessage ?? "Client event processing rejected.");
+            }
 
-            var serverReceivedAt = DateTime.UtcNow;
+            var signal = ingestionResult.EventSignal;
+            if (signal == null)
+            {
+                return Result<bool>.Success(true);
+            }
 
             Guid parsedEventGuid;
-            if (!Guid.TryParse(evt.EventId, out parsedEventGuid))
+            if (!Guid.TryParse(signal.EventId, out parsedEventGuid))
             {
                 parsedEventGuid = Guid.NewGuid();
             }
 
             Guid? parsedSessionGuid = null;
-            if (!string.IsNullOrEmpty(evt.SessionId) && Guid.TryParse(evt.SessionId, out var sGuid))
+            if (!string.IsNullOrEmpty(signal.SessionId) && Guid.TryParse(signal.SessionId, out var sGuid))
             {
                 parsedSessionGuid = sGuid;
             }
@@ -96,11 +78,11 @@ namespace Sayra.Backend.Application.Events
             var auditEvent = new AuditEvent
             {
                 EventId = parsedEventGuid,
-                EventType = evt.EventType.Trim().ToUpperInvariant(),
-                CorrelationId = evt.CorrelationId,
+                EventType = signal.EventType,
+                CorrelationId = signal.CorrelationId,
                 SessionId = parsedSessionGuid,
-                Timestamp = serverReceivedAt,
-                Payload = evt.Payload ?? "{}"
+                Timestamp = signal.ServerReceivedAt,
+                Payload = signal.Payload
             };
 
             await _auditEventRepository.AddAsync(auditEvent, cancellationToken);

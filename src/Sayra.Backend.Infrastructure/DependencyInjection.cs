@@ -217,7 +217,9 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQuery, RemoteCommandResponseDto?>, Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQuery, System.Collections.Generic.IReadOnlyList<RemoteCommandResponseDto>>, Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQueryHandler>();
 
-            // Telemetry Handlers
+            // Telemetry Ingestion Foundation Services & Handlers
+            services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIdempotencyService, Sayra.Backend.Application.Telemetry.TelemetryIdempotencyService>();
+            services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIngestionService, Sayra.Backend.Application.Telemetry.TelemetryIngestionService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Telemetry.IngestTelemetryCommand, bool>, Sayra.Backend.Application.Telemetry.IngestTelemetryCommandHandler>();
 
             // Event Handlers
