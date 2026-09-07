@@ -1,10 +1,12 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Persistence;
+using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Events;
 using Sayra.Backend.Application.Telemetry;
 using Sayra.Backend.Contracts;
@@ -18,12 +20,21 @@ namespace Sayra.Backend.UnitTests
         private readonly Mock<IRepository<AuditEvent>> _auditRepoMock = new();
         private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
         private readonly Mock<IRedisService> _redisServiceMock = new();
+        private readonly Mock<ISecurityEventService> _securityEventServiceMock = new();
+        private readonly TelemetryIdempotencyService _idempotencyService;
+        private readonly TelemetryIngestionService _ingestionService;
+
+        public TelemetryAndEventUnitTests()
+        {
+            _idempotencyService = new TelemetryIdempotencyService(_redisServiceMock.Object);
+            _ingestionService = new TelemetryIngestionService(_securityEventServiceMock.Object, _idempotencyService, NullLogger<TelemetryIngestionService>.Instance);
+        }
 
         [Fact]
         public async Task IngestTelemetry_ValidPayload_ShouldSucceed()
         {
             // Arrange
-            var handler = new IngestTelemetryCommandHandler(_telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
             var model = new TelemetryModel
             {
                 Cpu = 45.5,
@@ -47,12 +58,13 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestTelemetry_InvalidCpu_ShouldFailValidation()
         {
             // Arrange
-            var handler = new IngestTelemetryCommandHandler(_telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
             var model = new TelemetryModel
             {
                 Cpu = 150.0, // Invalid CPU percentage (> 100%)
                 Ram = 1024,
-                Uptime = 3600
+                Uptime = 3600,
+                Timestamp = DateTime.UtcNow
             };
             var command = new IngestTelemetryCommand(Guid.NewGuid(), "PC-001", model);
 
@@ -61,7 +73,7 @@ namespace Sayra.Backend.UnitTests
 
             // Assert
             Assert.False(result.IsSuccess);
-            Assert.Equal("CPU usage must be between 0% and 100%.", result.ErrorCode);
+            Assert.Equal("CPU usage must be between 0% and 100%.", result.ErrorMessage ?? result.ErrorCode);
             _telemetryRepoMock.Verify(r => r.AddAsync(It.IsAny<TelemetryMetric>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
@@ -69,7 +81,7 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestClientEvent_ValidEvent_ShouldPersistAuditEvent()
         {
             // Arrange
-            var handler = new IngestClientEventCommandHandler(_auditRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestClientEventCommandHandler(_ingestionService, _auditRepoMock.Object, _unitOfWorkMock.Object);
             var evtDto = new ClientEventEnvelopeDto
             {
                 EventId = Guid.NewGuid().ToString(),
@@ -98,14 +110,15 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestClientEvent_DuplicateEventId_ShouldBeIgnoredIdempotently()
         {
             // Arrange
-            var handler = new IngestClientEventCommandHandler(_auditRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestClientEventCommandHandler(_ingestionService, _auditRepoMock.Object, _unitOfWorkMock.Object);
             string eventId = Guid.NewGuid().ToString();
             var evtDto = new ClientEventEnvelopeDto
             {
                 EventId = eventId,
                 EventType = ClientEventType.ApplicationCrashed,
                 ClientId = "PC-100",
-                WorkstationId = "PC-100"
+                WorkstationId = "PC-100",
+                OccurredAt = DateTime.UtcNow
             };
             var command = new IngestClientEventCommand("PC-100", evtDto);
 
@@ -124,13 +137,14 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestClientEvent_MismatchedClientId_ShouldBeRejected()
         {
             // Arrange
-            var handler = new IngestClientEventCommandHandler(_auditRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestClientEventCommandHandler(_ingestionService, _auditRepoMock.Object, _unitOfWorkMock.Object);
             var evtDto = new ClientEventEnvelopeDto
             {
                 EventId = Guid.NewGuid().ToString(),
                 EventType = ClientEventType.SecurityEvent,
                 ClientId = "PC-999", // Mismatched ClientId vs Connection PC-ID PC-100
-                WorkstationId = "PC-100"
+                WorkstationId = "PC-100",
+                OccurredAt = DateTime.UtcNow
             };
             var command = new IngestClientEventCommand("PC-100", evtDto);
 
@@ -139,7 +153,7 @@ namespace Sayra.Backend.UnitTests
 
             // Assert
             Assert.False(result.IsSuccess);
-            Assert.Equal("ClientId does not match authenticated connection PC-ID.", result.ErrorCode);
+            Assert.Contains("does not match authenticated connection PC-ID", result.ErrorMessage ?? result.ErrorCode ?? "");
             _auditRepoMock.Verify(r => r.AddAsync(It.IsAny<AuditEvent>(), It.IsAny<CancellationToken>()), Times.Never);
         }
     }

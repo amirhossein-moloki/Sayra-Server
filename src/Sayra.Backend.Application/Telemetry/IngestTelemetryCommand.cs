@@ -19,15 +19,18 @@ namespace Sayra.Backend.Application.Telemetry
 
     public class IngestTelemetryCommandHandler : ICommandHandler<IngestTelemetryCommand, bool>
     {
+        private readonly ITelemetryIngestionService _ingestionService;
         private readonly IRepository<TelemetryMetric> _telemetryRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IRedisService _redisService;
 
         public IngestTelemetryCommandHandler(
+            ITelemetryIngestionService ingestionService,
             IRepository<TelemetryMetric> telemetryRepository,
             IUnitOfWork unitOfWork,
             IRedisService redisService)
         {
+            _ingestionService = ingestionService ?? throw new ArgumentNullException(nameof(ingestionService));
             _telemetryRepository = telemetryRepository ?? throw new ArgumentNullException(nameof(telemetryRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
@@ -37,68 +40,50 @@ namespace Sayra.Backend.Application.Telemetry
         {
             if (command == null || command.Telemetry == null)
             {
-                return Result<bool>.Failure("Telemetry data cannot be null.");
+                return Result<bool>.Failure("PayloadNull", "Telemetry data cannot be null.");
             }
 
-            var t = command.Telemetry;
+            var context = new TelemetryConnectionContext(
+                connectionId: Guid.NewGuid().ToString(),
+                pcId: command.PcId,
+                workstationId: command.WorkstationId);
 
-            // Strict Validation
-            if (t.Cpu < 0 || t.Cpu > 100)
+            var ingestionResult = await _ingestionService.IngestTelemetrySnapshotAsync(context, command.Telemetry, cancellationToken);
+            if (!ingestionResult.IsAccepted)
             {
-                return Result<bool>.Failure("CPU usage must be between 0% and 100%.");
+                return Result<bool>.Failure(ingestionResult.RejectionReason.ToString(), ingestionResult.ErrorMessage ?? "Telemetry ingestion rejected.");
             }
 
-            if (t.Ram < 0)
+            var snapshot = ingestionResult.Snapshot;
+            if (snapshot == null)
             {
-                return Result<bool>.Failure("RAM usage cannot be negative.");
+                return Result<bool>.Success(true);
             }
-
-            if (t.Uptime < 0)
-            {
-                return Result<bool>.Failure("Uptime cannot be negative.");
-            }
-
-            if (t.RunningGameCpu.HasValue && (t.RunningGameCpu.Value < 0 || t.RunningGameCpu.Value > 100))
-            {
-                return Result<bool>.Failure("Running game CPU usage must be between 0% and 100%.");
-            }
-
-            if (t.RunningGameRam.HasValue && t.RunningGameRam.Value < 0)
-            {
-                return Result<bool>.Failure("Running game RAM usage cannot be negative.");
-            }
-
-            if (!string.IsNullOrEmpty(t.RunningGameName) && t.RunningGameName.Length > 256)
-            {
-                return Result<bool>.Failure("Running game name exceeds maximum allowed length of 256 characters.");
-            }
-
-            var serverReceivedAt = DateTime.UtcNow;
 
             // Cache latest snapshot in Redis
             if (!string.IsNullOrEmpty(command.PcId))
             {
                 string redisKey = $"v1:telemetry:{command.PcId.Trim().ToUpperInvariant()}:latest";
-                var snapshot = new
+                var redisSnapshot = new
                 {
-                    command.WorkstationId,
-                    command.PcId,
-                    t.Cpu,
-                    t.Ram,
-                    t.Uptime,
-                    t.RunningGameName,
-                    t.RunningGamePid,
-                    t.RunningGameCpu,
-                    t.RunningGameRam,
-                    t.RunningGameDuration,
-                    t.TotalLaunches,
-                    t.TotalCrashes,
-                    t.TotalRestarts,
-                    ClientTimestamp = t.Timestamp,
-                    ServerReceivedAt = serverReceivedAt
+                    WorkstationId = snapshot.Identity.WorkstationId,
+                    PcId = snapshot.Identity.PcId,
+                    Cpu = snapshot.Cpu,
+                    Ram = snapshot.Ram,
+                    Uptime = snapshot.Uptime,
+                    RunningGameName = snapshot.RunningGameName,
+                    RunningGamePid = snapshot.RunningGamePid,
+                    RunningGameCpu = snapshot.RunningGameCpu,
+                    RunningGameRam = snapshot.RunningGameRam,
+                    RunningGameDuration = snapshot.RunningGameDuration,
+                    TotalLaunches = snapshot.TotalLaunches,
+                    TotalCrashes = snapshot.TotalCrashes,
+                    TotalRestarts = snapshot.TotalRestarts,
+                    ClientTimestamp = snapshot.ClientTimestamp,
+                    ServerReceivedAt = snapshot.ServerReceivedAt
                 };
 
-                await _redisService.SetAsync(redisKey, snapshot, TimeSpan.FromMinutes(15));
+                await _redisService.SetAsync(redisKey, redisSnapshot, TimeSpan.FromMinutes(15));
             }
 
             // Persist metrics in PostgreSQL
@@ -108,15 +93,15 @@ namespace Sayra.Backend.Application.Telemetry
                 {
                     WorkstationId = command.WorkstationId,
                     MetricName = "SystemUsage",
-                    MetricValue = t.Cpu,
-                    Timestamp = serverReceivedAt,
+                    MetricValue = snapshot.Cpu,
+                    Timestamp = snapshot.ServerReceivedAt,
                     DimensionJson = JsonSerializer.Serialize(new
                     {
-                        Ram = t.Ram,
-                        Uptime = t.Uptime,
-                        GameName = t.RunningGameName,
-                        GameCpu = t.RunningGameCpu,
-                        GameRam = t.RunningGameRam
+                        Ram = snapshot.Ram,
+                        Uptime = snapshot.Uptime,
+                        GameName = snapshot.RunningGameName,
+                        GameCpu = snapshot.RunningGameCpu,
+                        GameRam = snapshot.RunningGameRam
                     })
                 };
 

@@ -439,6 +439,42 @@ namespace Sayra.Backend.Infrastructure.Transport
                     {
                         _logger.LogInformation("Processing HEARTBEAT for connection {ConnectionId}...", connection.ConnectionId);
 
+                        if (_serviceScopeFactory != null)
+                        {
+                            try
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var heartbeatMsg = JsonSerializer.Deserialize<Sayra.Backend.Contracts.HeartbeatMessage>(plaintext, new JsonSerializerOptions
+                                {
+                                    PropertyNameCaseInsensitive = true
+                                }) ?? new Sayra.Backend.Contracts.HeartbeatMessage { PcId = connection.PcId ?? "", Timestamp = DateTime.UtcNow };
+
+                                var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
+                                var pcIdUpper = connection.PcId?.Trim().ToUpperInvariant() ?? "";
+                                var workstation = dbContext.Workstations.FirstOrDefault(w => w.PcId == pcIdUpper);
+
+                                var telemetryContext = new Sayra.Backend.Application.Telemetry.TelemetryConnectionContext(
+                                    connectionId: connection.ConnectionId,
+                                    pcId: connection.PcId ?? "",
+                                    workstationId: workstation?.Id,
+                                    siteId: workstation?.SiteEntityId,
+                                    organizationId: workstation?.OrganizationEntityId);
+
+                                var ingestionService = scope.ServiceProvider.GetRequiredService<Sayra.Backend.Application.Telemetry.ITelemetryIngestionService>();
+                                var heartbeatResult = await ingestionService.IngestHeartbeatAsync(telemetryContext, heartbeatMsg, cancellationToken);
+
+                                if (!heartbeatResult.IsAccepted)
+                                {
+                                    _logger.LogWarning("Heartbeat ingestion rejected for connection {ConnectionId}: {Reason}", connection.ConnectionId, heartbeatResult.ErrorMessage);
+                                    return;
+                                }
+                            }
+                            catch (Exception hbEx)
+                            {
+                                _logger.LogWarning(hbEx, "Failed to run telemetry ingestion for HEARTBEAT on {ConnectionId}.", connection.ConnectionId);
+                            }
+                        }
+
                         // Update LastActivity in SessionManager
                         await _sessionManager.UpdateLastActivityAsync(connection.ConnectionId, cancellationToken);
 
