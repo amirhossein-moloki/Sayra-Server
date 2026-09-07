@@ -11,12 +11,14 @@ using Sayra.Backend.Application.Events;
 using Sayra.Backend.Application.Telemetry;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Domain.Entities;
 
 namespace Sayra.Backend.UnitTests
 {
     public class TelemetryAndEventUnitTests
     {
         private readonly Mock<IRepository<TelemetryMetric>> _telemetryRepoMock = new();
+        private readonly Mock<ITelemetryHistoryRepository> _historyRepoMock = new();
         private readonly Mock<IRepository<AuditEvent>> _auditRepoMock = new();
         private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
         private readonly Mock<IRedisService> _redisServiceMock = new();
@@ -34,7 +36,7 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestTelemetry_ValidPayload_ShouldSucceed()
         {
             // Arrange
-            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _historyRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
             var model = new TelemetryModel
             {
                 Cpu = 45.5,
@@ -51,6 +53,7 @@ namespace Sayra.Backend.UnitTests
             Assert.True(result.IsSuccess);
             Assert.True(result.Value);
             _telemetryRepoMock.Verify(r => r.AddAsync(It.IsAny<TelemetryMetric>(), It.IsAny<CancellationToken>()), Times.Once);
+            _historyRepoMock.Verify(r => r.AddAsync(It.IsAny<TelemetryHistoryRecord>(), It.IsAny<CancellationToken>()), Times.Once);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -58,7 +61,7 @@ namespace Sayra.Backend.UnitTests
         public async Task IngestTelemetry_InvalidCpu_ShouldFailValidation()
         {
             // Arrange
-            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
+            var handler = new IngestTelemetryCommandHandler(_ingestionService, _telemetryRepoMock.Object, _historyRepoMock.Object, _unitOfWorkMock.Object, _redisServiceMock.Object);
             var model = new TelemetryModel
             {
                 Cpu = 150.0, // Invalid CPU percentage (> 100%)
@@ -75,6 +78,7 @@ namespace Sayra.Backend.UnitTests
             Assert.False(result.IsSuccess);
             Assert.Equal("CPU usage must be between 0% and 100%.", result.ErrorMessage ?? result.ErrorCode);
             _telemetryRepoMock.Verify(r => r.AddAsync(It.IsAny<TelemetryMetric>(), It.IsAny<CancellationToken>()), Times.Never);
+            _historyRepoMock.Verify(r => r.AddAsync(It.IsAny<TelemetryHistoryRecord>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Fact]

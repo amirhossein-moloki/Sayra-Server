@@ -2,8 +2,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Contracts;
+using Sayra.Backend.Domain.Entities;
 using Sayra.Backend.Domain.Enums;
 using Sayra.Backend.Domain.Telemetry;
 using Sayra.Backend.Domain.ValueObjects;
@@ -15,13 +17,15 @@ namespace Sayra.Backend.Application.Telemetry
         private readonly ISecurityEventService _securityEventService;
         private readonly ITelemetryIdempotencyService _idempotencyService;
         private readonly IWorkstationStateStore? _stateStore;
+        private readonly ITelemetryHistoryRepository? _historyRepository;
+        private readonly IUnitOfWork? _unitOfWork;
         private readonly ILogger<TelemetryIngestionService> _logger;
 
         public TelemetryIngestionService(
             ISecurityEventService securityEventService,
             ITelemetryIdempotencyService idempotencyService,
             ILogger<TelemetryIngestionService> logger)
-            : this(securityEventService, idempotencyService, null, logger)
+            : this(securityEventService, idempotencyService, null, null, null, logger)
         {
         }
 
@@ -30,10 +34,23 @@ namespace Sayra.Backend.Application.Telemetry
             ITelemetryIdempotencyService idempotencyService,
             IWorkstationStateStore? stateStore,
             ILogger<TelemetryIngestionService> logger)
+            : this(securityEventService, idempotencyService, stateStore, null, null, logger)
+        {
+        }
+
+        public TelemetryIngestionService(
+            ISecurityEventService securityEventService,
+            ITelemetryIdempotencyService idempotencyService,
+            IWorkstationStateStore? stateStore,
+            ITelemetryHistoryRepository? historyRepository,
+            IUnitOfWork? unitOfWork,
+            ILogger<TelemetryIngestionService> logger)
         {
             _securityEventService = securityEventService ?? throw new ArgumentNullException(nameof(securityEventService));
             _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
             _stateStore = stateStore;
+            _historyRepository = historyRepository;
+            _unitOfWork = unitOfWork;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -466,6 +483,17 @@ namespace Sayra.Backend.Application.Telemetry
             if (_stateStore != null)
             {
                 await _stateStore.UpdateFromHeartbeatAsync(identity, heartbeatSignal, connectionContext.ConnectionId, cancellationToken);
+            }
+
+            // Persist Heartbeat History
+            if (_historyRepository != null)
+            {
+                var heartbeatRecord = HeartbeatHistoryRecord.FromSignal(heartbeatSignal, connectionContext.ConnectionId);
+                await _historyRepository.AddHeartbeatRecordAsync(heartbeatRecord, cancellationToken);
+                if (_unitOfWork != null)
+                {
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
             }
 
             return TelemetryIngestionResult.AcceptedHeartbeat(heartbeatSignal, serverReceivedAt, processedAt);

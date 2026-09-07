@@ -74,11 +74,12 @@ namespace Sayra.Backend.Application.Events
                 parsedSessionGuid = sGuid;
             }
 
-            // Audit record persistence in AuditEvent repository
+            // Audit record persistence in AuditEvent repository bound to authenticated workstation
             var auditEvent = new AuditEvent
             {
                 EventId = parsedEventGuid,
                 EventType = signal.EventType,
+                WorkstationId = signal.Identity.WorkstationId,
                 CorrelationId = signal.CorrelationId,
                 SessionId = parsedSessionGuid,
                 Timestamp = signal.ServerReceivedAt,

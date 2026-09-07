@@ -7,6 +7,7 @@ using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Domain.Entities;
 using Sayra.Backend.Shared;
 
 namespace Sayra.Backend.Application.Telemetry
@@ -21,17 +22,20 @@ namespace Sayra.Backend.Application.Telemetry
     {
         private readonly ITelemetryIngestionService _ingestionService;
         private readonly IRepository<TelemetryMetric> _telemetryRepository;
+        private readonly ITelemetryHistoryRepository _historyRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IRedisService _redisService;
 
         public IngestTelemetryCommandHandler(
             ITelemetryIngestionService ingestionService,
             IRepository<TelemetryMetric> telemetryRepository,
+            ITelemetryHistoryRepository historyRepository,
             IUnitOfWork unitOfWork,
             IRedisService redisService)
         {
             _ingestionService = ingestionService ?? throw new ArgumentNullException(nameof(ingestionService));
             _telemetryRepository = telemetryRepository ?? throw new ArgumentNullException(nameof(telemetryRepository));
+            _historyRepository = historyRepository ?? throw new ArgumentNullException(nameof(historyRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
         }
@@ -86,7 +90,7 @@ namespace Sayra.Backend.Application.Telemetry
                 await _redisService.SetAsync(redisKey, redisSnapshot, TimeSpan.FromMinutes(15));
             }
 
-            // Persist metrics in PostgreSQL
+            // Persist metrics and historical telemetry record in PostgreSQL
             if (command.WorkstationId != Guid.Empty)
             {
                 var metric = new TelemetryMetric
@@ -106,6 +110,10 @@ namespace Sayra.Backend.Application.Telemetry
                 };
 
                 await _telemetryRepository.AddAsync(metric, cancellationToken);
+
+                var historyRecord = TelemetryHistoryRecord.FromSnapshot(snapshot, context.ConnectionId);
+                await _historyRepository.AddAsync(historyRecord, cancellationToken);
+
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
