@@ -239,6 +239,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IUpdateReleaseRepository, UpdateReleaseRepository>();
             services.AddScoped<IUpdatePackageRepository, UpdatePackageRepository>();
             services.AddScoped<IUpdateTargetRepository, UpdateTargetRepository>();
+            services.AddScoped<ITelemetryHistoryRepository, TelemetryHistoryRepository>();
 
             // Update Artifact Ingestion, Storage & Package Validation Services
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateArtifactStorage, Sayra.Backend.Infrastructure.Updates.LocalUpdateArtifactStorage>();
