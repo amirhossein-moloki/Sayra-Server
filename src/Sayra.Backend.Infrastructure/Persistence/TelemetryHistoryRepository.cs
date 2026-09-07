@@ -53,6 +53,32 @@ namespace Sayra.Backend.Infrastructure.Persistence
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<IReadOnlyList<TelemetryHistoryRecord>> GetHistoryAllAsync(
+            DateTime? from = null,
+            DateTime? to = null,
+            int limit = 1000,
+            CancellationToken cancellationToken = default)
+        {
+            int boundedLimit = Math.Clamp(limit, 1, MaxQueryLimit);
+
+            var query = _appDbContext.TelemetryHistoryRecords.AsNoTracking();
+
+            if (from.HasValue)
+            {
+                query = query.Where(t => t.ServerReceivedAt >= from.Value);
+            }
+
+            if (to.HasValue)
+            {
+                query = query.Where(t => t.ServerReceivedAt <= to.Value);
+            }
+
+            return await query
+                .OrderBy(t => t.ServerReceivedAt)
+                .Take(boundedLimit)
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<IReadOnlyList<TelemetryHistoryRecord>> GetHistoryForSiteAsync(
             Guid siteId,
             DateTime? from = null,
