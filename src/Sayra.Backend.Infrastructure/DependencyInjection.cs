@@ -41,6 +41,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<UpdatesOptions>(configuration.GetSection(UpdatesOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Updates.UpdateValidationOptions>(configuration.GetSection(Sayra.Backend.Application.Updates.UpdateValidationOptions.SectionName));
             services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+            services.Configure<TelemetryAggregationOptions>(configuration.GetSection(TelemetryAggregationOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationStateOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationStateOptions.SectionName));
 
             // 2. Database Foundation Setup
@@ -224,6 +225,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationStateReader>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationStateStore>());
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIdempotencyService, Sayra.Backend.Application.Telemetry.TelemetryIdempotencyService>();
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIngestionService, Sayra.Backend.Application.Telemetry.TelemetryIngestionService>();
+            services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryAggregationService, Sayra.Backend.Application.Telemetry.TelemetryAggregationService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Telemetry.IngestTelemetryCommand, bool>, Sayra.Backend.Application.Telemetry.IngestTelemetryCommandHandler>();
 
             // Event Handlers
@@ -240,6 +242,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IUpdatePackageRepository, UpdatePackageRepository>();
             services.AddScoped<IUpdateTargetRepository, UpdateTargetRepository>();
             services.AddScoped<ITelemetryHistoryRepository, TelemetryHistoryRepository>();
+            services.AddScoped<ITelemetryAggregateRepository, TelemetryAggregateRepository>();
 
             // Update Artifact Ingestion, Storage & Package Validation Services
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateArtifactStorage, Sayra.Backend.Infrastructure.Updates.LocalUpdateArtifactStorage>();
@@ -360,6 +363,7 @@ namespace Sayra.Backend.Infrastructure
 
             services.AddHostedService<LivenessMonitoringWorker>();
             services.AddHostedService<RemoteCommandTimeoutWorker>();
+            services.AddHostedService<Sayra.Backend.Infrastructure.Telemetry.TelemetryAggregationWorker>();
 
             // 7. Health Checks
             services.AddHealthChecks()

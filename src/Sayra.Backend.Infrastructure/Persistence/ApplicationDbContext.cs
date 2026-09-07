@@ -38,6 +38,8 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<TelemetryHistoryRecord> TelemetryHistoryRecords { get; set; } = null!;
         public DbSet<HeartbeatHistoryRecord> HeartbeatHistoryRecords { get; set; } = null!;
+        public DbSet<TelemetryAggregateRecord> TelemetryAggregateRecords { get; set; } = null!;
+        public DbSet<TelemetryAggregationCheckpoint> TelemetryAggregationCheckpoints { get; set; } = null!;
         public DbSet<ConfigurationPackage> ConfigurationPackages { get; set; } = null!;
         public DbSet<ConfigurationPublication> ConfigurationPublications { get; set; } = null!;
         public DbSet<ConfigurationSigningKey> ConfigurationSigningKeys { get; set; } = null!;
