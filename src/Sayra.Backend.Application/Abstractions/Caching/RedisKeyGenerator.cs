@@ -21,6 +21,12 @@ namespace Sayra.Backend.Application.Abstractions.Caching
         public static string CommandStateKey(Guid commandId) =>
             $"{VersionPrefix}:command:{commandId:N}:state";
 
+        public static string WorkstationHealthKey(Guid workstationId) =>
+            $"{VersionPrefix}:workstation:{workstationId:N}:health";
+
+        public static string WorkstationHealthKeyByPcId(string pcId) =>
+            $"{VersionPrefix}:workstation:pcid:{(pcId ?? string.Empty).Trim().ToUpperInvariant()}:health";
+
         public static string IdempotencyKey(string key) =>
             $"{VersionPrefix}:idempotency:{key}:state";
     }
