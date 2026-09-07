@@ -43,6 +43,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
             services.Configure<TelemetryAggregationOptions>(configuration.GetSection(TelemetryAggregationOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationStateOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationStateOptions.SectionName));
+            services.Configure<Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions.SectionName));
 
             // 2. Database Foundation Setup
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
@@ -223,6 +224,11 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<Sayra.Backend.Application.Telemetry.WorkstationStateStore>();
             services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationStateStore>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationStateStore>());
             services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationStateReader>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationStateStore>());
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.WorkstationHealthStore>();
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationHealthStore>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationHealthStore>());
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationHealthReader>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationHealthStore>());
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationHealthMetrics, Sayra.Backend.Application.Telemetry.WorkstationHealthMetrics>();
+            services.AddScoped<Sayra.Backend.Application.Telemetry.IWorkstationHealthEvaluator, Sayra.Backend.Application.Telemetry.WorkstationHealthEvaluator>();
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIdempotencyService, Sayra.Backend.Application.Telemetry.TelemetryIdempotencyService>();
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIngestionService, Sayra.Backend.Application.Telemetry.TelemetryIngestionService>();
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryAggregationService, Sayra.Backend.Application.Telemetry.TelemetryAggregationService>();
@@ -364,6 +370,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddHostedService<LivenessMonitoringWorker>();
             services.AddHostedService<RemoteCommandTimeoutWorker>();
             services.AddHostedService<Sayra.Backend.Infrastructure.Telemetry.TelemetryAggregationWorker>();
+            services.AddHostedService<Sayra.Backend.Infrastructure.Telemetry.WorkstationHealthEvaluationWorker>();
 
             // 7. Health Checks
             services.AddHealthChecks()
