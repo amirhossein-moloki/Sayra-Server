@@ -41,6 +41,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<UpdatesOptions>(configuration.GetSection(UpdatesOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Updates.UpdateValidationOptions>(configuration.GetSection(Sayra.Backend.Application.Updates.UpdateValidationOptions.SectionName));
             services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+            services.Configure<Sayra.Backend.Application.Telemetry.WorkstationStateOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationStateOptions.SectionName));
 
             // 2. Database Foundation Setup
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
@@ -217,7 +218,10 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQuery, RemoteCommandResponseDto?>, Sayra.Backend.Application.Commands.GetRemoteCommandByCommandIdQueryHandler>();
             services.AddScoped<IQueryHandler<Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQuery, System.Collections.Generic.IReadOnlyList<RemoteCommandResponseDto>>, Sayra.Backend.Application.Commands.GetRemoteCommandsByWorkstationQueryHandler>();
 
-            // Telemetry Ingestion Foundation Services & Handlers
+            // Telemetry Ingestion & Real-Time Workstation State Foundation Services
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.WorkstationStateStore>();
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationStateStore>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationStateStore>());
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IWorkstationStateReader>(provider => provider.GetRequiredService<Sayra.Backend.Application.Telemetry.WorkstationStateStore>());
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIdempotencyService, Sayra.Backend.Application.Telemetry.TelemetryIdempotencyService>();
             services.AddScoped<Sayra.Backend.Application.Telemetry.ITelemetryIngestionService, Sayra.Backend.Application.Telemetry.TelemetryIngestionService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Telemetry.IngestTelemetryCommand, bool>, Sayra.Backend.Application.Telemetry.IngestTelemetryCommandHandler>();
