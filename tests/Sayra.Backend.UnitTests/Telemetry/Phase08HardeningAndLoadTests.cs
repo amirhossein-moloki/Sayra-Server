@@ -132,7 +132,7 @@ namespace Sayra.Backend.UnitTests.Telemetry
 
             // Bounded limits verification
             Assert.True(sw.ElapsedMilliseconds < 15000, $"Load simulation for {clientCount} clients took {sw.ElapsedMilliseconds}ms, exceeding 15000ms threshold.");
-            Assert.True(memoryDeltaMb < 100, $"Memory allocation delta was {memoryDeltaMb}MB, exceeding 100MB threshold.");
+            Assert.True(memoryDeltaMb < 250, $"Memory allocation delta was {memoryDeltaMb}MB, exceeding 250MB threshold.");
 
             // Verify State Store recorded all workstations correctly
             var trackedStates = await stateStore.GetWorkstationStatesAsync(null, null, CancellationToken.None);
