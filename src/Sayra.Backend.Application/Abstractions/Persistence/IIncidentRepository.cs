@@ -20,5 +20,18 @@ namespace Sayra.Backend.Application.Abstractions.Persistence
             int skip = 0,
             int take = 100,
             CancellationToken cancellationToken = default);
+
+        Task<(IReadOnlyList<Incident> Items, int TotalCount)> QueryIncidentsAsync(
+            Guid? organizationId = null,
+            Guid? siteId = null,
+            Guid? workstationId = null,
+            string? pcId = null,
+            AlertSeverity? severity = null,
+            IncidentLifecycleState? state = null,
+            string? ruleName = null,
+            bool? activeOnly = null,
+            int skip = 0,
+            int take = 50,
+            CancellationToken cancellationToken = default);
     }
 }

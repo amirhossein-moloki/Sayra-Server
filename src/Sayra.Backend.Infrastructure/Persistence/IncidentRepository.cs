@@ -105,5 +105,76 @@ namespace Sayra.Backend.Infrastructure.Persistence
                 .Take(safeTake)
                 .ToListAsync(cancellationToken);
         }
+
+        public async Task<(IReadOnlyList<Incident> Items, int TotalCount)> QueryIncidentsAsync(
+            Guid? organizationId = null,
+            Guid? siteId = null,
+            Guid? workstationId = null,
+            string? pcId = null,
+            AlertSeverity? severity = null,
+            IncidentLifecycleState? state = null,
+            string? ruleName = null,
+            bool? activeOnly = null,
+            int skip = 0,
+            int take = 50,
+            CancellationToken cancellationToken = default)
+        {
+            var query = _context.Incidents.AsNoTracking();
+
+            if (organizationId.HasValue)
+            {
+                query = query.Where(i => i.OrganizationId == organizationId.Value);
+            }
+
+            if (siteId.HasValue)
+            {
+                query = query.Where(i => i.SiteId == siteId.Value);
+            }
+
+            if (workstationId.HasValue)
+            {
+                query = query.Where(i => i.WorkstationId == workstationId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(pcId))
+            {
+                var normPcId = pcId.Trim().ToUpperInvariant();
+                query = query.Where(i => i.PcId == normPcId);
+            }
+
+            if (severity.HasValue)
+            {
+                query = query.Where(i => i.Severity == severity.Value);
+            }
+
+            if (state.HasValue)
+            {
+                query = query.Where(i => i.LifecycleState == state.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(ruleName))
+            {
+                var normRule = ruleName.Trim();
+                query = query.Where(i => i.RuleCode == normRule);
+            }
+
+            if (activeOnly.HasValue && activeOnly.Value)
+            {
+                query = query.Where(i => i.LifecycleState != IncidentLifecycleState.Resolved);
+            }
+
+            int totalCount = await query.CountAsync(cancellationToken);
+
+            int safeTake = Math.Clamp(take, 1, 1000);
+            int safeSkip = Math.Max(0, skip);
+
+            var items = await query
+                .OrderByDescending(i => i.LastObservedAtUtc)
+                .Skip(safeSkip)
+                .Take(safeTake)
+                .ToListAsync(cancellationToken);
+
+            return (items, totalCount);
+        }
     }
 }
