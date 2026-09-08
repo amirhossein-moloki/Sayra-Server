@@ -64,6 +64,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<UpdateRelease> UpdateReleases { get; set; } = null!;
         public DbSet<UpdatePackage> UpdatePackages { get; set; } = null!;
         public DbSet<UpdateTarget> UpdateTargets { get; set; } = null!;
+        public DbSet<Incident> Incidents { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
