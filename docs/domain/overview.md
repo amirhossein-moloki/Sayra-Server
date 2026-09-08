@@ -57,3 +57,8 @@ The domain layer (`Sayra.Backend.Domain`) contains pure domain logic, entities, 
   Monotonic expansion guarantees that increasing rollout percentages never eject previously eligible client workstations.
 * **Secure Resumable Streaming**:
   Download API supports HTTP `200 OK` (full download) and HTTP `206 Partial Content` / `416 Range Not Satisfiable` (Range requests). Content streaming uses bounded 64 KB memory buffers ($O(1)$ memory usage) with `ETag` checksums and sanitized filename headers.
+
+### 2.6. Telemetry, Health Evaluation, and Alerting & Incident State Subsystem
+* **Telemetry & Event Ingestion**: Ingests heartbeats, telemetry metrics, and operational events with strict identity binding (`connection.PcId` authoritative), deduplication, and historical persistence.
+* **Workstation Health Evaluation**: Evaluates workstation metrics against `WorkstationHealthPolicyOptions` thresholds with hysteresis recovery, producing authoritative health results (`Healthy`, `Warning`, `Degraded`, `Critical`, `Offline`).
+* **Alerting & Incident State**: Evaluates health results against `AlertRule` options using deterministic SHA-256 fingerprints ($\text{OrganizationId} \parallel \text{SiteId} \parallel \text{PcId} \parallel \text{RuleCode} \parallel \text{Resource}$). Manages durable incident lifecycle transitions (`Normal` ➔ `Triggered` ➔ `Firing` ➔ `Resolved`), observation counts, policy suppression, notification dispatch, and alert storm protection.

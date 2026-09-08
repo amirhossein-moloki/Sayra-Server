@@ -80,6 +80,7 @@ namespace Sayra.Backend.Infrastructure.Telemetry
             var stateReader = scope.ServiceProvider.GetRequiredService<IWorkstationStateReader>();
             var healthStore = scope.ServiceProvider.GetRequiredService<IWorkstationHealthStore>();
             var evaluator = scope.ServiceProvider.GetRequiredService<IWorkstationHealthEvaluator>();
+            var alertEngine = scope.ServiceProvider.GetService<IAlertEvaluationEngine>();
             var metrics = scope.ServiceProvider.GetService<IWorkstationHealthMetrics>();
 
             var sw = Stopwatch.StartNew();
@@ -116,6 +117,18 @@ namespace Sayra.Backend.Infrastructure.Telemetry
                     }
 
                     await healthStore.SaveHealthResultAsync(newHealth, cancellationToken);
+
+                    if (alertEngine != null)
+                    {
+                        try
+                        {
+                            await alertEngine.EvaluateHealthResultAsync(newHealth, cancellationToken);
+                        }
+                        catch (Exception alertEx) when (alertEx is not OperationCanceledException)
+                        {
+                            _logger.LogWarning(alertEx, "Failed alert evaluation for workstation {PcId}.", state.PcId);
+                        }
+                    }
 
                     switch (newHealth.HealthState)
                     {

@@ -44,6 +44,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<TelemetryAggregationOptions>(configuration.GetSection(TelemetryAggregationOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationStateOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationStateOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions.SectionName));
+            services.Configure<Sayra.Backend.Application.Telemetry.AlertingOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.AlertingOptions.SectionName));
 
             // 2. Database Foundation Setup
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
@@ -249,6 +250,10 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IUpdateTargetRepository, UpdateTargetRepository>();
             services.AddScoped<ITelemetryHistoryRepository, TelemetryHistoryRepository>();
             services.AddScoped<ITelemetryAggregateRepository, TelemetryAggregateRepository>();
+            services.AddScoped<IIncidentRepository, IncidentRepository>();
+            services.AddSingleton<Sayra.Backend.Application.Telemetry.IAlertMetrics, Sayra.Backend.Infrastructure.Telemetry.AlertMetrics>();
+            services.AddScoped<Sayra.Backend.Application.Telemetry.IAlertNotificationDispatcher, Sayra.Backend.Infrastructure.Telemetry.AlertNotificationDispatcher>();
+            services.AddScoped<Sayra.Backend.Application.Telemetry.IAlertEvaluationEngine, Sayra.Backend.Infrastructure.Telemetry.AlertEvaluationEngine>();
 
             // Update Artifact Ingestion, Storage & Package Validation Services
             services.AddSingleton<Sayra.Backend.Application.Updates.IUpdateArtifactStorage, Sayra.Backend.Infrastructure.Updates.LocalUpdateArtifactStorage>();
