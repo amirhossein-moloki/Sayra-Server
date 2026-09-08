@@ -677,7 +677,15 @@ namespace Sayra.Backend.UnitTests.Telemetry
 
         public Task SaveIncidentAsync(Incident incident, CancellationToken cancellationToken = default)
         {
-            _incidents.Add(incident);
+            var idx = _incidents.FindIndex(i => i.Id == incident.Id);
+            if (idx >= 0)
+            {
+                _incidents[idx] = incident;
+            }
+            else
+            {
+                _incidents.Add(incident);
+            }
             return Task.CompletedTask;
         }
     }
