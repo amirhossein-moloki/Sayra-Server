@@ -22,6 +22,7 @@ namespace Sayra.Backend.Application.Telemetry
         private readonly WorkstationStateOptions _options;
         private readonly ILogger<WorkstationStateStore> _logger;
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _pcIdLocks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SemaphoreSlim _indexLock = new(1, 1);
 
         public WorkstationStateStore(
             IRedisService redisService,
@@ -340,12 +341,20 @@ namespace Sayra.Backend.Application.Telemetry
         {
             try
             {
-                var tracked = await _redisService.GetAsync<HashSet<string>>(IndexRedisKey, cancellationToken)
-                    ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                if (tracked.Add(pcId.Trim().ToUpperInvariant()))
+                await _indexLock.WaitAsync(cancellationToken);
+                try
                 {
-                    await _redisService.SetAsync(IndexRedisKey, tracked, TimeSpan.FromDays(7), cancellationToken);
+                    var tracked = await _redisService.GetAsync<HashSet<string>>(IndexRedisKey, cancellationToken)
+                        ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    if (tracked.Add(pcId.Trim().ToUpperInvariant()))
+                    {
+                        await _redisService.SetAsync(IndexRedisKey, tracked, TimeSpan.FromDays(7), cancellationToken);
+                    }
+                }
+                finally
+                {
+                    _indexLock.Release();
                 }
             }
             catch (Exception ex)

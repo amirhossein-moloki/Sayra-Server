@@ -31,6 +31,7 @@ Welcome to the **SAYRA Central Backend** documentation knowledge base. This docu
 
 ### 6. 🚀 [Operations & Deployment](operations/deployment.md)
 * **[Deployment & Operational Procedures](operations/deployment.md)**: Production deployment guide using Docker Compose, environment configuration (`ServerOptions`, `SecurityOptions`, `ConfigurationCacheOptions`), background workers (`LivenessMonitoringWorker`, `RemoteCommandTimeoutWorker`), and OpenTelemetry / Serilog observability.
+* **[Phase 08 Hardening & Verification Report](operations/phase08-performance-reliability-security-report.md)**: Empirical performance, reliability, security hardening, load/stress test results, dependency failure matrix, PostgreSQL storage calculations, Redis reliability, and Phase 08 readiness audit.
 
 ### 7. 📜 [Architectural Decision Records (ADRs)](decisions/index.md)
 * **[ADR Index](decisions/index.md)**: Record of 12 foundational engineering decisions:
