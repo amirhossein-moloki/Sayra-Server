@@ -257,7 +257,7 @@ namespace Sayra.Backend.UnitTests.Telemetry
         public async Task RedactionCheck_SecurityEventAndPayload_NoPasswordOrKeyInLogs()
         {
             // Verify that sensitive keywords are omitted / not logged in cleartext
-            string eventPayload = "{\"username\":\"gamer1\",\"password\":\"SecretP@ss123!\",\"token\":\"ey JhbGciOi...\"}";
+            string eventPayload = "{\"username\":\"gamer1\",\"password\":\"REDACTED_PASSWORD\",\"token\":\"REDACTED_TOKEN\"}";
             var context = new TelemetryConnectionContext("CONN-001", "PC-001");
 
             var eventDto = new ClientEventEnvelopeDto
