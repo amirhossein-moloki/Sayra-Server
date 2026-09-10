@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -20,6 +21,8 @@ namespace Sayra.Backend.Infrastructure.Transport
     /// <summary>
     /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n',
     /// enforcing maximum message frame size limits for memory protection.
+    /// Optimized using ReadOnlySpan and CollectionsMarshal for zero-allocation frame slicing
+    /// and SIMD-accelerated newline delimiter scanning.
     /// </summary>
     public class TcpFrameParser
     {
@@ -34,30 +37,26 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public void Append(byte[] data, int length)
         {
+            if (data == null || length <= 0)
+                return;
+
             lock (_lock)
             {
-                if (_buffer.Count + length > _maxMessageSize && !_buffer.Contains((byte)'\n'))
-                {
-                    bool containsNewlineInNewData = false;
-                    for (int i = 0; i < length; i++)
-                    {
-                        if (data[i] == (byte)'\n')
-                        {
-                            containsNewlineInNewData = true;
-                            break;
-                        }
-                    }
+                ReadOnlySpan<byte> bufferSpan = CollectionsMarshal.AsSpan(_buffer);
+                ReadOnlySpan<byte> dataSpan = data.AsSpan(0, length);
 
-                    if (!containsNewlineInNewData)
+                // Check maximum frame size limit when appending bytes without a newline
+                if (_buffer.Count + length > _maxMessageSize && bufferSpan.IndexOf((byte)'\n') < 0)
+                {
+                    if (dataSpan.IndexOf((byte)'\n') < 0)
                     {
                         throw new InvalidOperationException($"Maximum message frame size ({_maxMessageSize} bytes) exceeded.");
                     }
                 }
 
-                for (int i = 0; i < length; i++)
-                {
-                    _buffer.Add(data[i]);
-                }
+                // Pre-allocate buffer capacity and bulk-append bytes using ReadOnlySpan to avoid element-by-element loop overhead
+                _buffer.EnsureCapacity(_buffer.Count + length);
+                _buffer.AddRange(dataSpan);
             }
         }
 
@@ -66,20 +65,34 @@ namespace Sayra.Backend.Infrastructure.Transport
             var frames = new List<string>();
             lock (_lock)
             {
-                int index;
-                while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
+                while (true)
                 {
+                    ReadOnlySpan<byte> span = CollectionsMarshal.AsSpan(_buffer);
+                    int index = span.IndexOf((byte)'\n');
+                    if (index < 0)
+                    {
+                        break;
+                    }
+
                     if (index > _maxMessageSize)
                     {
                         _buffer.Clear();
                         throw new InvalidOperationException($"Frame length ({index} bytes) exceeds maximum limit of {_maxMessageSize} bytes.");
                     }
 
-                    byte[] frameBytes = new byte[index];
-                    _buffer.CopyTo(0, frameBytes, 0, index);
-                    _buffer.RemoveRange(0, index + 1);
+                    // Decode frame string directly from the span slice to eliminate per-frame byte[] array heap allocation
+                    string frameStr = Encoding.UTF8.GetString(span.Slice(0, index)).Trim();
 
-                    string frameStr = Encoding.UTF8.GetString(frameBytes).Trim();
+                    // Perform O(1) buffer reset when all bytes are consumed, or remove consumed frame bytes
+                    if (index + 1 == _buffer.Count)
+                    {
+                        _buffer.Clear();
+                    }
+                    else
+                    {
+                        _buffer.RemoveRange(0, index + 1);
+                    }
+
                     if (!string.IsNullOrEmpty(frameStr))
                     {
                         frames.Add(frameStr);
