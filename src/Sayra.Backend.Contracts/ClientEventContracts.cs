@@ -10,6 +10,8 @@ namespace Sayra.Backend.Contracts
         public string WorkstationId { get; set; } = string.Empty;
         public string? SessionId { get; set; }
         public string CorrelationId { get; set; } = string.Empty;
+        public long SequenceNumber { get; set; }
+        public string ContractVersion { get; set; } = "1.0";
         public DateTime OccurredAt { get; set; }
         public string Payload { get; set; } = "{}";
     }
