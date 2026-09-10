@@ -12,6 +12,12 @@ namespace Sayra.Backend.Contracts
         public const string NotQueueable = "NOT_QUEUEABLE";
     }
 
+    public static class OfflineSyncMessageTypes
+    {
+        public const string OfflineSyncBatch = "OFFLINE_SYNC_BATCH";
+        public const string OfflineSyncAck = "OFFLINE_SYNC_ACK";
+    }
+
     public class OfflineQueueItem
     {
         public string EventId { get; set; } = string.Empty;
