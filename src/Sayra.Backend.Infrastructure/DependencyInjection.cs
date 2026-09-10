@@ -10,6 +10,8 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Gamers;
+using Sayra.Backend.Application.OfflineQueue;
+using Sayra.Backend.Infrastructure.OfflineQueue;
 using Sayra.Backend.Application.Financial;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
@@ -45,8 +47,27 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationStateOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationStateOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.AlertingOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.AlertingOptions.SectionName));
+            services.Configure<OfflineQueueOptions>(configuration.GetSection(OfflineQueueOptions.SectionName));
 
             // 2. Database Foundation Setup
+            var offlineQueueOptions = configuration.GetSection(OfflineQueueOptions.SectionName).Get<OfflineQueueOptions>() ?? new OfflineQueueOptions();
+            var sqliteDbPath = offlineQueueOptions.DbPath;
+            var sqliteConnectionString = !string.IsNullOrWhiteSpace(offlineQueueOptions.ConnectionString)
+                ? offlineQueueOptions.ConnectionString
+                : $"Data Source={sqliteDbPath}";
+
+            if (!string.IsNullOrWhiteSpace(offlineQueueOptions.EncryptionKey))
+            {
+                sqliteConnectionString += $";Password={offlineQueueOptions.EncryptionKey}";
+            }
+
+            services.AddDbContext<SqliteOfflineQueueDbContext>(options =>
+            {
+                options.UseSqlite(sqliteConnectionString);
+            });
+
+            services.AddScoped<IDurableOfflineQueue, SqliteDurableOfflineQueue>();
+
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
             var dbConnectionString = dbOptions.ConnectionString;
 
