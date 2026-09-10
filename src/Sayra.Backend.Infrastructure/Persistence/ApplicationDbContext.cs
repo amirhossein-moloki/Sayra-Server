@@ -35,6 +35,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public DbSet<FinancialTransaction> FinancialTransactions { get; set; } = null!;
         public DbSet<Payment> Payments { get; set; } = null!;
         public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
+        public DbSet<ProcessedEvent> ProcessedEvents { get; set; } = null!;
         public DbSet<TelemetryMetric> TelemetryMetrics { get; set; } = null!;
         public DbSet<TelemetryHistoryRecord> TelemetryHistoryRecords { get; set; } = null!;
         public DbSet<HeartbeatHistoryRecord> HeartbeatHistoryRecords { get; set; } = null!;

@@ -237,6 +237,7 @@ namespace Sayra.Backend.Infrastructure
             // Remote Command Infrastructure Services & CQRS Handlers
             services.AddScoped<IRemoteCommandRepository, RemoteCommandRepository>();
             services.AddScoped<IRemoteCommandManager, RemoteCommandManager>();
+            services.AddScoped<IProcessedEventRepository, ProcessedEventRepository>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.CreateRemoteCommand, RemoteCommandResponseDto>, Sayra.Backend.Application.Commands.CreateRemoteCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandAckCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandAckCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandResultCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandResultCommandHandler>();
