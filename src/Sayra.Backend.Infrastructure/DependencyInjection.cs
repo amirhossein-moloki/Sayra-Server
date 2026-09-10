@@ -48,6 +48,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.WorkstationHealthPolicyOptions.SectionName));
             services.Configure<Sayra.Backend.Application.Telemetry.AlertingOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.AlertingOptions.SectionName));
             services.Configure<OfflineQueueOptions>(configuration.GetSection(OfflineQueueOptions.SectionName));
+            services.Configure<OfflineSyncWorkerOptions>(configuration.GetSection("OfflineSyncWorker"));
 
             // 2. Database Foundation Setup
             var offlineQueueOptions = configuration.GetSection(OfflineQueueOptions.SectionName).Get<OfflineQueueOptions>() ?? new OfflineQueueOptions();
@@ -67,6 +68,8 @@ namespace Sayra.Backend.Infrastructure
             });
 
             services.AddScoped<IDurableOfflineQueue, SqliteDurableOfflineQueue>();
+            services.AddScoped<IOfflineSyncWorker, OfflineSyncWorker>();
+            services.AddScoped<ICommandHandler<Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommand, Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchResult>, Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommandHandler>();
 
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
             var dbConnectionString = dbOptions.ConnectionString;

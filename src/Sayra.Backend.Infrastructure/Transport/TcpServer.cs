@@ -645,6 +645,50 @@ namespace Sayra.Backend.Infrastructure.Transport
                             _logger.LogWarning(resEx, "Failed to process EXECUTION_RESULT for connection {ConnectionId}.", connection.ConnectionId);
                         }
                     }
+                    else if ((msgType.Equals("OFFLINE_SYNC_BATCH", StringComparison.OrdinalIgnoreCase) || msgType.Equals("OFFLINE_BATCH", StringComparison.OrdinalIgnoreCase)) && _serviceScopeFactory != null)
+                    {
+                        _logger.LogInformation("Processing OFFLINE_SYNC_BATCH for connection {ConnectionId} (PC-ID: {PcId})...", connection.ConnectionId, connection.PcId);
+                        try
+                        {
+                            JsonElement batchElem = root;
+                            if (root.TryGetProperty("batch", out var bProp) || root.TryGetProperty("Batch", out bProp) || root.TryGetProperty("payload", out bProp))
+                            {
+                                batchElem = bProp;
+                            }
+
+                            var batchReq = JsonSerializer.Deserialize<Sayra.Backend.Contracts.OfflineBatchRequest>(batchElem.GetRawText(), new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            });
+
+                            if (batchReq != null)
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var handler = scope.ServiceProvider.GetRequiredService<ICommandHandler<Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommand, Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchResult>>();
+
+                                var command = new Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommand(connection.ConnectionId, connection.PcId ?? "", batchReq);
+                                var result = await handler.HandleAsync(command, cancellationToken);
+
+                                if (result.IsSuccess && result.Value?.Acknowledgment != null)
+                                {
+                                    var ackMessage = new Sayra.Backend.Contracts.CommunicationMessage<Sayra.Backend.Contracts.OfflineBatchAcknowledgment>
+                                    {
+                                        Metadata = Sayra.Backend.Contracts.MessageMetadata.Create(
+                                            Sayra.Backend.Contracts.OfflineSyncMessageTypes.OfflineSyncAck,
+                                            senderId: connection.PcId),
+                                        Payload = result.Value.Acknowledgment
+                                    };
+
+                                    await _secureMessageService.SendSecureMessageAsync(session, ackMessage);
+                                    _logger.LogInformation("Sent OFFLINE_SYNC_ACK back to connection {ConnectionId} for Batch {BatchId}.", connection.ConnectionId, result.Value.Acknowledgment.BatchId);
+                                }
+                            }
+                        }
+                        catch (Exception syncEx)
+                        {
+                            _logger.LogWarning(syncEx, "Failed to process OFFLINE_SYNC_BATCH for connection {ConnectionId}.", connection.ConnectionId);
+                        }
+                    }
                     else if (msgType.Equals("SESSION_COMMAND_REQUEST", StringComparison.OrdinalIgnoreCase) && _serviceScopeFactory != null)
                     {
                         _logger.LogInformation("Processing SESSION_COMMAND_REQUEST for connection {ConnectionId}...", connection.ConnectionId);
