@@ -1,41 +1,28 @@
 using System;
 using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Messaging;
-using Sayra.Backend.Application.Abstractions.Persistence;
 using Sayra.Backend.Contracts;
-using Sayra.Backend.Domain;
-using Sayra.Backend.Domain.Entities;
 using Sayra.Backend.Shared;
 
 namespace Sayra.Backend.Application.OfflineQueue
 {
     public class IngestOfflineBatchCommandHandler : ICommandHandler<IngestOfflineBatchCommand, IngestOfflineBatchResult>
     {
-        private readonly IProcessedEventRepository _processedEventRepository;
-        private readonly IRepository<Workstation> _workstationRepository;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IRedisService? _redisService;
+        private readonly IOfflineOrderingAndReconciliationEngine _orderingEngine;
         private readonly ILogger<IngestOfflineBatchCommandHandler> _logger;
+        private readonly IRedisService? _redisService;
         private const int MaxBatchItemCount = 100;
-        private const int MaxSinglePayloadBytes = 256 * 1024; // 256 KB
 
         public IngestOfflineBatchCommandHandler(
-            IProcessedEventRepository processedEventRepository,
-            IRepository<Workstation> workstationRepository,
-            IUnitOfWork unitOfWork,
+            IOfflineOrderingAndReconciliationEngine orderingEngine,
             ILogger<IngestOfflineBatchCommandHandler> logger,
             IRedisService? redisService = null)
         {
-            _processedEventRepository = processedEventRepository ?? throw new ArgumentNullException(nameof(processedEventRepository));
-            _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _orderingEngine = orderingEngine ?? throw new ArgumentNullException(nameof(orderingEngine));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _redisService = redisService;
         }
@@ -72,10 +59,6 @@ namespace Sayra.Backend.Application.OfflineQueue
                 return Result<IngestOfflineBatchResult>.Success(new IngestOfflineBatchResult(ack));
             }
 
-            // Resolve Authoritative Workstation Entity
-            var workstation = await _workstationRepository.FirstOrDefaultAsync(w => w.PcId == authPcId, false, cancellationToken);
-            Guid? resolvedWorkstationId = workstation?.Id;
-
             // Empty Batch Check
             if (request.Items == null || request.Items.Count == 0)
             {
@@ -98,7 +81,7 @@ namespace Sayra.Backend.Application.OfflineQueue
 
             foreach (var item in request.Items)
             {
-                if (item == null || string.IsNullOrWhiteSpace(item.EventId) || !Guid.TryParse(item.EventId, out var eventGuid))
+                if (item == null || string.IsNullOrWhiteSpace(item.EventId))
                 {
                     _logger.LogWarning("Rejecting item in batch {BatchId}: Invalid or missing EventId.", request.BatchId);
                     if (item != null && !string.IsNullOrWhiteSpace(item.EventId))
@@ -108,122 +91,37 @@ namespace Sayra.Backend.Application.OfflineQueue
                     continue;
                 }
 
-                // Payload extraction & size check
-                string payloadText = item.Payload is JsonElement elem ? elem.GetRawText() : (item.Payload?.ToString() ?? "{}");
-                byte[] payloadBytes = Encoding.UTF8.GetBytes(payloadText);
-                if (payloadBytes.Length > MaxSinglePayloadBytes)
-                {
-                    _logger.LogWarning("Rejecting event {EventId} in batch {BatchId}: Payload exceeds 256 KB limit.", item.EventId, request.BatchId);
-                    rejectedIds.Add(item.EventId);
-                    continue;
-                }
-
-                string payloadHash = ComputeSha256(payloadBytes);
-                string redisDedupKey = $"v1:event:dedup:{item.EventId}";
-
-                // 1. Fast Redis Idempotency Check
-                bool isCachedInRedis = false;
-                if (_redisService != null)
-                {
-                    try
-                    {
-                        var redisValue = await _redisService.GetAsync<string>(redisDedupKey, cancellationToken);
-                        if (!string.IsNullOrEmpty(redisValue))
-                        {
-                            isCachedInRedis = true;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Redis lookup failed for event {EventId}, falling back to DB.", item.EventId);
-                    }
-                }
-
-                // 2. Database Idempotency & Conflict Check
-                var existingEvent = await _processedEventRepository.GetByEventIdAsync(eventGuid, true, cancellationToken);
-
-                if (existingEvent != null)
-                {
-                    existingEvent.LastReceivedAt = DateTime.UtcNow;
-
-                    if (existingEvent.PayloadHash.Equals(payloadHash, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogInformation("Duplicate offline event {EventId} detected in batch {BatchId}. Idempotently ACKed.", item.EventId, request.BatchId);
-                        existingEvent.ProcessingStatus = "DUPLICATE";
-                        acceptedIds.Add(item.EventId);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("CONFLICT ALERT: EventId {EventId} retransmitted with modified payload. Original hash={OrigHash}, New hash={NewHash}.",
-                            item.EventId, existingEvent.PayloadHash, payloadHash);
-                        existingEvent.ProcessingStatus = "CONFLICT";
-                        existingEvent.ErrorMessage = "Conflicting payload hash for existing EventId.";
-                        rejectedIds.Add(item.EventId);
-                    }
-
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                    continue;
-                }
-
-                if (isCachedInRedis)
-                {
-                    // Redis indicated previously processed, but missing in current DB query
-                    _logger.LogInformation("Duplicate offline event {EventId} detected via Redis cache. Idempotently ACKed.", item.EventId);
-                    acceptedIds.Add(item.EventId);
-                    continue;
-                }
-
-                // 3. First Delivery - Persist ProcessedEvent
-                var newProcessedEvent = new ProcessedEvent
-                {
-                    EventId = eventGuid,
-                    BatchId = request.BatchId,
-                    ClientId = authPcId,
-                    WorkstationId = resolvedWorkstationId,
-                    EventType = item.EventType ?? string.Empty,
-                    SequenceNumber = item.SequenceNumber,
-                    ReliabilityClass = item.ReliabilityClass ?? "NORMAL",
-                    ProcessingStatus = "ACCEPTED",
-                    PayloadHash = payloadHash,
-                    FirstReceivedAt = DateTime.UtcNow,
-                    LastReceivedAt = DateTime.UtcNow,
-                    ProcessedAt = DateTime.UtcNow
-                };
-
-                await _processedEventRepository.AddAsync(newProcessedEvent, cancellationToken);
-
                 try
                 {
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                    acceptedIds.Add(item.EventId);
+                    var evalResult = await _orderingEngine.EvaluateAndReconcileAsync(item, authPcId, request.BatchId, cancellationToken);
 
-                    // Set Redis dedup cache (24h TTL)
-                    if (_redisService != null)
-                    {
-                        try
-                        {
-                            await _redisService.SetAsync(redisDedupKey, "ACCEPTED", TimeSpan.FromHours(24), cancellationToken);
-                        }
-                        catch (Exception redisEx)
-                        {
-                            _logger.LogWarning(redisEx, "Failed to cache event {EventId} in Redis.", item.EventId);
-                        }
-                    }
-                }
-                catch (Exception dbEx)
-                {
-                    // Race condition or DB update failure: concurrent duplicate request inserted same EventId
-                    _logger.LogWarning(dbEx, "Database persistence error / unique constraint race condition on EventId {EventId}. Handling safely.", item.EventId);
-
-                    var racedEvent = await _processedEventRepository.GetByEventIdAsync(eventGuid, false, cancellationToken);
-                    if (racedEvent != null && racedEvent.PayloadHash.Equals(payloadHash, StringComparison.OrdinalIgnoreCase))
+                    if (evalResult.IsAcceptedForAck)
                     {
                         acceptedIds.Add(item.EventId);
+
+                        // Transient Redis Deduplication Cache (24h TTL)
+                        if (_redisService != null)
+                        {
+                            try
+                            {
+                                string redisDedupKey = $"v1:event:dedup:{item.EventId}";
+                                await _redisService.SetAsync(redisDedupKey, evalResult.ReconciliationStatus, TimeSpan.FromHours(24), cancellationToken);
+                            }
+                            catch (Exception redisEx)
+                            {
+                                _logger.LogWarning(redisEx, "Failed to cache event {EventId} in Redis.", item.EventId);
+                            }
+                        }
                     }
                     else
                     {
                         rejectedIds.Add(item.EventId);
                     }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing event {EventId} in batch {BatchId}.", item.EventId, request.BatchId);
+                    rejectedIds.Add(item.EventId);
                 }
             }
 
@@ -236,18 +134,6 @@ namespace Sayra.Backend.Application.OfflineQueue
                 request.BatchId, authPcId, acceptedIds.Count, rejectedIds.Count);
 
             return Result<IngestOfflineBatchResult>.Success(new IngestOfflineBatchResult(ack));
-        }
-
-        private static string ComputeSha256(byte[] data)
-        {
-            using var sha256 = SHA256.Create();
-            byte[] hashBytes = sha256.ComputeHash(data);
-            var sb = new StringBuilder(hashBytes.Length * 2);
-            foreach (byte b in hashBytes)
-            {
-                sb.Append(b.ToString("x2"));
-            }
-            return sb.ToString();
         }
     }
 }

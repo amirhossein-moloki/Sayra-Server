@@ -49,6 +49,7 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<Sayra.Backend.Application.Telemetry.AlertingOptions>(configuration.GetSection(Sayra.Backend.Application.Telemetry.AlertingOptions.SectionName));
             services.Configure<OfflineQueueOptions>(configuration.GetSection(OfflineQueueOptions.SectionName));
             services.Configure<OfflineSyncWorkerOptions>(configuration.GetSection("OfflineSyncWorker"));
+            services.Configure<OfflineOrderingOptions>(configuration.GetSection(OfflineOrderingOptions.SectionName));
 
             // 2. Database Foundation Setup
             var offlineQueueOptions = configuration.GetSection(OfflineQueueOptions.SectionName).Get<OfflineQueueOptions>() ?? new OfflineQueueOptions();
@@ -238,6 +239,8 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IRemoteCommandRepository, RemoteCommandRepository>();
             services.AddScoped<IRemoteCommandManager, RemoteCommandManager>();
             services.AddScoped<IProcessedEventRepository, ProcessedEventRepository>();
+            services.AddScoped<IWorkstationStreamStateRepository, WorkstationStreamStateRepository>();
+            services.AddScoped<IOfflineOrderingAndReconciliationEngine, OfflineOrderingAndReconciliationEngine>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.CreateRemoteCommand, RemoteCommandResponseDto>, Sayra.Backend.Application.Commands.CreateRemoteCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandAckCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandAckCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandResultCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandResultCommandHandler>();

@@ -37,6 +37,11 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .IsRequired()
                 .HasDefaultValue("NORMAL");
 
+            builder.Property(e => e.OrderingStatus)
+                .HasMaxLength(50)
+                .IsRequired()
+                .HasDefaultValue("UNORDERED");
+
             builder.Property(e => e.ProcessingStatus)
                 .HasMaxLength(50)
                 .IsRequired()
@@ -46,8 +51,16 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
                 .HasMaxLength(64)
                 .IsRequired();
 
+            builder.Property(e => e.ReasonCode)
+                .HasMaxLength(100);
+
             builder.Property(e => e.ErrorMessage)
                 .HasMaxLength(2000);
+
+            builder.Property(e => e.ConflictMetadata)
+                .HasMaxLength(2000);
+
+            builder.Property(e => e.OccurredAt);
 
             builder.Property(e => e.FirstReceivedAt)
                 .IsRequired();
@@ -58,6 +71,8 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.Property(e => e.ProcessedAt)
                 .IsRequired();
 
+            builder.Property(e => e.ReconciledAt);
+
             // Explicit database uniqueness constraint on EventId
             builder.HasIndex(e => e.EventId)
                 .IsUnique();
@@ -65,6 +80,7 @@ namespace Sayra.Backend.Infrastructure.Persistence.Configurations
             builder.HasIndex(e => e.BatchId);
             builder.HasIndex(e => e.ClientId);
             builder.HasIndex(e => e.FirstReceivedAt);
+            builder.HasIndex(e => new { e.ClientId, e.ProcessingStatus, e.SequenceNumber });
         }
     }
 }
