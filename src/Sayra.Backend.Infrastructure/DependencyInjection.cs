@@ -240,6 +240,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddScoped<IRemoteCommandManager, RemoteCommandManager>();
             services.AddScoped<IProcessedEventRepository, ProcessedEventRepository>();
             services.AddScoped<IWorkstationStreamStateRepository, WorkstationStreamStateRepository>();
+            services.AddScoped<IOfflineBusinessReconciliationService, OfflineBusinessReconciliationService>();
             services.AddScoped<IOfflineOrderingAndReconciliationEngine, OfflineOrderingAndReconciliationEngine>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.CreateRemoteCommand, RemoteCommandResponseDto>, Sayra.Backend.Application.Commands.CreateRemoteCommandHandler>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.Commands.ProcessCommandAckCommand, bool>, Sayra.Backend.Application.Commands.ProcessCommandAckCommandHandler>();
