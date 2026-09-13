@@ -16,8 +16,9 @@ namespace Sayra.Backend.Api
 {
     public class Program
     {
-        public static int Main(string[] args)
+        public static void Main(string[] args)
         {
+            Console.Error.WriteLine($"[Program.cs Main Started] args={string.Join(",", args)}");
             EnvLoader.Load();
 
             Log.Logger = new LoggerConfiguration()
@@ -105,13 +106,11 @@ namespace Sayra.Backend.Api
                 app.MapControllers();
 
                 app.Run();
-
-                return 0;
             }
-            catch (Exception ex) when (ex.GetType().Name != "HostAbortedException")
+            catch (Exception ex) when (ex.GetType().Name != "HostAbortedException" && ex.InnerException?.GetType().Name != "HostAbortedException")
             {
+                Console.Error.WriteLine($"[CRITICAL_STARTUP_ERROR] {ex}");
                 Log.Fatal(ex, "Host terminated unexpectedly");
-                return 1;
             }
             finally
             {
