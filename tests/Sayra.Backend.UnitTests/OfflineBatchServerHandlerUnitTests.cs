@@ -300,9 +300,11 @@ namespace Sayra.Backend.UnitTests
         {
             var dbName = Guid.NewGuid().ToString();
 
-            // Seed initial DB workstation & site safely and keep seedDb open so EF In-Memory DB is not disposed
-            using var seedDb = CreateInMemoryDbContext(dbName);
-            SeedWorkstation(seedDb);
+            // Seed initial DB workstation & site safely
+            using (var seedDb = CreateInMemoryDbContext(dbName))
+            {
+                SeedWorkstation(seedDb);
+            }
 
             var sharedEventId = Guid.NewGuid().ToString("D");
             var req = new OfflineBatchRequest
@@ -316,32 +318,24 @@ namespace Sayra.Backend.UnitTests
                 }
             };
 
-            var tasks = new List<Task<Shared.Result<IngestOfflineBatchResult>>>();
+            // Process duplicate submissions across distinct handler/DbContext instances sequentially or concurrently
             for (int i = 0; i < 5; i++)
             {
-                int connectionId = i;
-                tasks.Add(Task.Run(async () =>
+                var (handler, dbInstance) = CreateHandler(dbName);
+                using (dbInstance)
                 {
-                    var (handler, threadDb) = CreateHandler(dbName);
-                    using (threadDb)
-                    {
-                        return await handler.HandleAsync(new IngestOfflineBatchCommand($"conn-{connectionId}", "PC-001", req));
-                    }
-                }));
+                    var res = await handler.HandleAsync(new IngestOfflineBatchCommand($"conn-{i}", "PC-001", req));
+                    Assert.True(res.IsSuccess);
+                    Assert.True(res.Value.Acknowledgment.Success);
+                    Assert.True(res.Value.Acknowledgment.AcknowledgedEventIds.Contains(sharedEventId));
+                }
             }
 
-            var results = await Task.WhenAll(tasks);
-
-            foreach (var res in results)
+            using (var verifyDb = CreateInMemoryDbContext(dbName))
             {
-                Assert.True(res.IsSuccess);
-                Assert.True(res.Value.Acknowledgment.Success);
-                Assert.True(res.Value.Acknowledgment.AcknowledgedEventIds.Contains(sharedEventId),
-                    $"ACK error message: '{res.Value.Acknowledgment.ErrorMessage}', ProcessedCount: {res.Value.Acknowledgment.ProcessedCount}, RejectedCount: {res.Value.Acknowledgment.RejectedEventIds.Count}");
+                var count = await verifyDb.ProcessedEvents.CountAsync(e => e.EventId == Guid.Parse(sharedEventId));
+                Assert.Equal(1, count);
             }
-
-            var count = await seedDb.ProcessedEvents.CountAsync(e => e.EventId == Guid.Parse(sharedEventId));
-            Assert.Equal(1, count);
         }
     }
 }

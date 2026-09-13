@@ -31,7 +31,6 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IOfflineBusinessReconciliationService? _businessReconciliationService;
         private readonly ILogger<OfflineOrderingAndReconciliationEngine> _logger;
 
-        private static readonly SemaphoreSlim _concurrencyLock = new(1, 1);
         private const int MaxSinglePayloadBytes = 256 * 1024; // 256 KB
 
         public OfflineOrderingAndReconciliationEngine(
@@ -72,7 +71,6 @@ namespace Sayra.Backend.Application.OfflineQueue
         {
             if (item == null) throw new ArgumentNullException(nameof(item));
 
-            await _concurrencyLock.WaitAsync(cancellationToken);
             try
             {
                 return await EvaluateAndReconcileInternalAsync(item, authenticatedPcId, batchId, cancellationToken);
@@ -100,10 +98,6 @@ namespace Sayra.Backend.Application.OfflineQueue
 
                 return CreateResult(item.EventId, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
                     OfflineReasonCode.MalformedPayload, ex.Message, isAcceptedForAck: false);
-            }
-            finally
-            {
-                _concurrencyLock.Release();
             }
         }
 
