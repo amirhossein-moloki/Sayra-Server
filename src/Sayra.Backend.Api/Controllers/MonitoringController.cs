@@ -208,6 +208,23 @@ namespace Sayra.Backend.Api.Controllers
             return MapResult(result);
         }
 
+        [HttpGet("offline/summary")]
+        [HasPermission(PermissionCatalog.ViewWorkstations)]
+        public async Task<IActionResult> GetOfflineOperationalSummaryAsync(
+            [FromQuery] Guid? siteId,
+            [FromQuery] Guid? organizationId,
+            CancellationToken cancellationToken = default)
+        {
+            var principal = GetPrincipal();
+            if (principal == null || !principal.IsAuthenticated)
+            {
+                return Unauthorized(new { code = "UNAUTHORIZED", message = "Authentication is required to view offline operational summary." });
+            }
+
+            var result = await _queryService.GetOfflineOperationalSummaryAsync(principal, siteId, organizationId, cancellationToken);
+            return MapResult(result);
+        }
+
         private UserPrincipal? GetPrincipal()
         {
             return HttpContext.Items["UserPrincipal"] as UserPrincipal;

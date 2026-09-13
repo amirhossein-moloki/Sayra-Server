@@ -202,4 +202,25 @@ namespace Sayra.Backend.Application.Telemetry
         public int PageSize { get; set; }
         public string? NextCursor { get; set; }
     }
+
+    public class OfflineOperationalSummaryDto
+    {
+        public Guid? OrganizationId { get; set; }
+        public Guid? SiteId { get; set; }
+        public int TotalProcessedEvents { get; set; }
+        public int AcceptedCount { get; set; }
+        public int DuplicateCount { get; set; }
+        public int RejectedCount { get; set; }
+        public int ConflictCount { get; set; }
+        public int WaitingForSequenceCount { get; set; }
+        public int TotalStreamStates { get; set; }
+        public int ActiveSequenceGaps { get; set; }
+        public int TotalDlqEvents { get; set; }
+        public int ActiveDeadLetterCount { get; set; }
+        public int RecoveredDlqCount { get; set; }
+        public int RejectedDlqCount { get; set; }
+        public int ExpiredDlqCount { get; set; }
+        public Dictionary<string, int> DlqFailureCodeBreakdown { get; set; } = new Dictionary<string, int>();
+        public DateTime EvaluatedAtUtc { get; set; } = DateTime.UtcNow;
+    }
 }

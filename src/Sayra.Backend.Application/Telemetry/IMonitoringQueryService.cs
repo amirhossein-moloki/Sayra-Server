@@ -72,5 +72,11 @@ namespace Sayra.Backend.Application.Telemetry
             UserPrincipal principal,
             Guid incidentId,
             CancellationToken cancellationToken = default);
+
+        Task<Result<OfflineOperationalSummaryDto>> GetOfflineOperationalSummaryAsync(
+            UserPrincipal principal,
+            Guid? siteId = null,
+            Guid? organizationId = null,
+            CancellationToken cancellationToken = default);
     }
 }

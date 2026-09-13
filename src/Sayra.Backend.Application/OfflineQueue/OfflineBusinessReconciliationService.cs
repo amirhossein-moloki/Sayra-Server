@@ -23,6 +23,7 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IRemoteCommandManager? _remoteCommandManager;
         private readonly IRepository<AuditEvent> _auditEventRepository;
         private readonly ILogger<OfflineBusinessReconciliationService> _logger;
+        private readonly IOfflineMetrics? _metrics;
 
         public OfflineBusinessReconciliationService(
             ICommandHandler<StartSessionCommand, SessionResponseDto> startSessionHandler,
@@ -32,7 +33,8 @@ namespace Sayra.Backend.Application.OfflineQueue
             ICommandHandler<ExtendSessionCommand, SessionExtensionResponseDto> extendSessionHandler,
             IRepository<AuditEvent> auditEventRepository,
             ILogger<OfflineBusinessReconciliationService> logger,
-            IRemoteCommandManager? remoteCommandManager = null)
+            IRemoteCommandManager? remoteCommandManager = null,
+            IOfflineMetrics? metrics = null)
         {
             _startSessionHandler = startSessionHandler ?? throw new ArgumentNullException(nameof(startSessionHandler));
             _stopSessionHandler = stopSessionHandler ?? throw new ArgumentNullException(nameof(stopSessionHandler));
@@ -42,6 +44,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _remoteCommandManager = remoteCommandManager;
+            _metrics = metrics;
         }
 
         public async Task<BusinessReconciliationResult> ReconcileAsync(
@@ -60,7 +63,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             _logger.LogInformation("Reconciling offline event {EventId} of type {EventType} for workstation {PcId}.",
                 item.EventId, eventType, workstation.PcId);
 
-            return eventType switch
+            var result = eventType switch
             {
                 "SESSION_COMMAND_REQUEST" => await ReconcileSessionCommandRequestAsync(item, workstation, payloadText, cancellationToken),
                 ClientEventType.SessionRuntimeEvent => await ReconcileInformationalEventAsync(item, workstation, "SESSION_RUNTIME_EVENT", payloadText, cancellationToken),
@@ -79,6 +82,13 @@ namespace Sayra.Backend.Application.OfflineQueue
                 "EXECUTION_RESULT" or "COMMAND_RESULT" => await ReconcileExecutionResultAsync(item, workstation, payloadText, cancellationToken),
                 _ => ReconcileUnsupportedEvent(item, eventType)
             };
+
+            if (result.Status == OfflineReconciliationStatus.Conflict)
+            {
+                _metrics?.RecordReconciliationConflict(eventType, result.ReasonCode);
+            }
+
+            return result;
         }
 
         private async Task<BusinessReconciliationResult> ReconcileSessionCommandRequestAsync(

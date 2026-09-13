@@ -30,6 +30,7 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IFailureClassificationService? _failureClassifier;
         private readonly IOfflineBusinessReconciliationService? _businessReconciliationService;
         private readonly ILogger<OfflineOrderingAndReconciliationEngine> _logger;
+        private readonly IOfflineMetrics? _metrics;
 
         private const int MaxSinglePayloadBytes = 256 * 1024; // 256 KB
 
@@ -46,7 +47,8 @@ namespace Sayra.Backend.Application.OfflineQueue
             IRedisService? redisService = null,
             IDeadLetterEventRepository? deadLetterRepository = null,
             IFailureClassificationService? failureClassifier = null,
-            IOfflineBusinessReconciliationService? businessReconciliationService = null)
+            IOfflineBusinessReconciliationService? businessReconciliationService = null,
+            IOfflineMetrics? metrics = null)
         {
             _processedEventRepository = processedEventRepository ?? throw new ArgumentNullException(nameof(processedEventRepository));
             _streamStateRepository = streamStateRepository ?? throw new ArgumentNullException(nameof(streamStateRepository));
@@ -61,6 +63,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             _deadLetterRepository = deadLetterRepository;
             _failureClassifier = failureClassifier;
             _businessReconciliationService = businessReconciliationService;
+            _metrics = metrics;
         }
 
         public async Task<OrderingAndReconciliationResult> EvaluateAndReconcileAsync(
@@ -71,12 +74,27 @@ namespace Sayra.Backend.Application.OfflineQueue
         {
             if (item == null) throw new ArgumentNullException(nameof(item));
 
+            _metrics?.RecordReconciliationAttempt(item.EventType ?? "UNKNOWN");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             try
             {
-                return await EvaluateAndReconcileInternalAsync(item, authenticatedPcId, batchId, cancellationToken);
+                var result = await EvaluateAndReconcileInternalAsync(item, authenticatedPcId, batchId, cancellationToken);
+                sw.Stop();
+                if (result.IsAcceptedForAck)
+                {
+                    _metrics?.RecordReconciliationSuccess(item.EventType ?? "UNKNOWN", sw.Elapsed.TotalSeconds);
+                }
+                else
+                {
+                    _metrics?.RecordReconciliationFailure(item.EventType ?? "UNKNOWN", result.ReasonCode ?? "REJECTED", sw.Elapsed.TotalSeconds);
+                }
+                return result;
             }
             catch (Exception ex)
             {
+                sw.Stop();
+                _metrics?.RecordReconciliationFailure(item.EventType ?? "UNKNOWN", "INTERNAL_ERROR", sw.Elapsed.TotalSeconds);
                 _logger.LogError(ex, "Unexpected error evaluating event {EventId} in batch {BatchId}.", item.EventId, batchId);
 
                 if (Guid.TryParse(item.EventId, out var eventGuid))
@@ -140,6 +158,8 @@ namespace Sayra.Backend.Application.OfflineQueue
             {
                 _logger.LogWarning("SECURITY ALERT: Offline event {EventId} identity mismatch. Connection PcId={AuthPcId}, Payload identity={PayloadClientId}.",
                     item.EventId, authPcId, payloadClientId);
+
+                _metrics?.RecordSecurityRejection("IDENTITY_MISMATCH");
 
                 var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Rejected,
                     OfflineReasonCode.IdentityMismatch, "Payload client identity does not match authenticated TCP session identity.", isAcceptedForAck: false);
@@ -247,6 +267,8 @@ namespace Sayra.Backend.Application.OfflineQueue
                     _logger.LogWarning("CONFLICT ALERT: EventId {EventId} retransmitted with modified payload. Original hash={OrigHash}, New hash={NewHash}.",
                         item.EventId, existingEvent.PayloadHash, payloadHash);
 
+                    _metrics?.RecordIdempotencyConflict(item.EventType ?? "UNKNOWN", "PAYLOAD_HASH_CONFLICT");
+
                     existingEvent.ProcessingStatus = OfflineReconciliationStatus.Conflict;
                     existingEvent.OrderingStatus = OfflineOrderingStatus.SequenceConflict;
                     existingEvent.ReasonCode = OfflineReasonCode.PayloadHashConflict;
@@ -316,6 +338,7 @@ namespace Sayra.Backend.Application.OfflineQueue
                 else if (receivedSequence > expectedSequence)
                 {
                     // SEQUENCE GAP DETECTED
+                    _metrics?.RecordSequenceGapDetected(item.EventType ?? "UNKNOWN");
                     _logger.LogInformation("Sequence gap detected for workstation {PcId}: Received sequence {Received}, Expected sequence {Expected}.",
                         authPcId, receivedSequence, expectedSequence);
 
@@ -527,6 +550,8 @@ namespace Sayra.Backend.Application.OfflineQueue
 
                     await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    _metrics?.RecordEventMovedToDlq(failureCode, item.EventType ?? "UNKNOWN");
                 }
             }
             catch (Exception ex)
