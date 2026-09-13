@@ -68,8 +68,12 @@ namespace Sayra.Backend.Infrastructure
                 options.UseSqlite(sqliteConnectionString);
             });
 
+            services.AddSingleton<IOfflineMetrics, OfflineMetrics>();
             services.AddScoped<IDurableOfflineQueue, SqliteDurableOfflineQueue>();
             services.AddScoped<IOfflineSyncWorker, OfflineSyncWorker>();
+            services.AddScoped<IDeadLetterEventRepository, DeadLetterEventRepository>();
+            services.AddScoped<IOfflineDlqService, OfflineDlqService>();
+            services.AddScoped<IFailureClassificationService, FailureClassificationService>();
             services.AddScoped<ICommandHandler<Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommand, Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchResult>, Sayra.Backend.Application.OfflineQueue.IngestOfflineBatchCommandHandler>();
 
             var dbOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
@@ -428,7 +432,11 @@ namespace Sayra.Backend.Infrastructure
                 .AddCheck<UpdateSigningHealthCheck>(
                     name: "UpdateSigning",
                     failureStatus: HealthStatus.Unhealthy,
-                    tags: new[] { "ready", "updates" });
+                    tags: new[] { "ready", "updates" })
+                .AddCheck<OfflineQueueHealthCheck>(
+                    name: "OfflineQueue",
+                    failureStatus: HealthStatus.Degraded,
+                    tags: new[] { "ready", "offline" });
 
             return services;
         }

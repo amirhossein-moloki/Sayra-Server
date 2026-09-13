@@ -24,6 +24,9 @@ namespace Sayra.Backend.Application.Telemetry
         private readonly ITelemetryHistoryRepository _telemetryHistoryRepository;
         private readonly ITelemetryAggregateRepository _telemetryAggregateRepository;
         private readonly IRepository<AuditEvent> _auditEventRepository;
+        private readonly IProcessedEventRepository? _processedEventRepository;
+        private readonly IWorkstationStreamStateRepository? _streamStateRepository;
+        private readonly OfflineQueue.IDeadLetterEventRepository? _dlqRepository;
 
         public MonitoringQueryService(
             IAuthorizationService authorizationService,
@@ -34,7 +37,10 @@ namespace Sayra.Backend.Application.Telemetry
             IIncidentRepository incidentRepository,
             ITelemetryHistoryRepository telemetryHistoryRepository,
             ITelemetryAggregateRepository telemetryAggregateRepository,
-            IRepository<AuditEvent> auditEventRepository)
+            IRepository<AuditEvent> auditEventRepository,
+            IProcessedEventRepository? processedEventRepository = null,
+            IWorkstationStreamStateRepository? streamStateRepository = null,
+            OfflineQueue.IDeadLetterEventRepository? dlqRepository = null)
         {
             _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _workstationRepository = workstationRepository ?? throw new ArgumentNullException(nameof(workstationRepository));
@@ -45,6 +51,9 @@ namespace Sayra.Backend.Application.Telemetry
             _telemetryHistoryRepository = telemetryHistoryRepository ?? throw new ArgumentNullException(nameof(telemetryHistoryRepository));
             _telemetryAggregateRepository = telemetryAggregateRepository ?? throw new ArgumentNullException(nameof(telemetryAggregateRepository));
             _auditEventRepository = auditEventRepository ?? throw new ArgumentNullException(nameof(auditEventRepository));
+            _processedEventRepository = processedEventRepository;
+            _streamStateRepository = streamStateRepository;
+            _dlqRepository = dlqRepository;
         }
 
         public async Task<Result<FleetWorkstationsResponseDto>> GetFleetWorkstationsAsync(
@@ -674,6 +683,118 @@ namespace Sayra.Backend.Application.Telemetry
             };
 
             return Result<IncidentDetailDto>.Success(dto);
+        }
+
+        public async Task<Result<OfflineOperationalSummaryDto>> GetOfflineOperationalSummaryAsync(
+            UserPrincipal principal,
+            Guid? siteId = null,
+            Guid? organizationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var authCheck = await ValidateUserAndPermissionAsync(principal, PermissionCatalog.ViewWorkstations, cancellationToken);
+            if (!authCheck.IsSuccess) return Result<OfflineOperationalSummaryDto>.Failure(authCheck.ErrorCode ?? "UNAUTHORIZED", authCheck.ErrorMessage);
+
+            var scopeCheck = ResolveScope(principal, organizationId, siteId);
+            if (!scopeCheck.IsSuccess) return Result<OfflineOperationalSummaryDto>.Failure(scopeCheck.ErrorCode ?? "CROSS_ORGANIZATION_ACCESS_DENIED", scopeCheck.ErrorMessage);
+
+            var effectiveOrgId = scopeCheck.Value.OrganizationId;
+            var effectiveSiteId = scopeCheck.Value.SiteId;
+
+            var summary = new OfflineOperationalSummaryDto
+            {
+                OrganizationId = effectiveOrgId,
+                SiteId = effectiveSiteId,
+                EvaluatedAtUtc = DateTime.UtcNow
+            };
+
+            // Resolve Workstation IDs for Tenant Isolation
+            HashSet<Guid>? scopedWsIds = null;
+            HashSet<string>? scopedPcIds = null;
+
+            if (effectiveOrgId.HasValue || effectiveSiteId.HasValue)
+            {
+                var scopedWorkstations = await _workstationRepository.FindAsync(
+                    w => (!effectiveOrgId.HasValue || w.OrganizationEntityId == effectiveOrgId.Value) &&
+                         (!effectiveSiteId.HasValue || w.SiteEntityId == effectiveSiteId.Value),
+                    track: false,
+                    cancellationToken: cancellationToken);
+
+                scopedWsIds = scopedWorkstations?.Select(w => w.Id).ToHashSet() ?? new HashSet<Guid>();
+                scopedPcIds = scopedWorkstations?.Select(w => w.PcId).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            // Query Processed Events scoped to Tenant
+            if (_processedEventRepository != null)
+            {
+                IReadOnlyList<ProcessedEvent> processedEvents;
+                if (scopedWsIds != null && scopedPcIds != null)
+                {
+                    processedEvents = await _processedEventRepository.FindAsync(
+                        e => (e.WorkstationId.HasValue && scopedWsIds.Contains(e.WorkstationId.Value)) || scopedPcIds.Contains(e.ClientId),
+                        track: false,
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    processedEvents = await _processedEventRepository.GetAllAsync(track: false, cancellationToken: cancellationToken);
+                }
+
+                summary.TotalProcessedEvents = processedEvents.Count;
+                summary.AcceptedCount = processedEvents.Count(e => e.ProcessingStatus == "ACCEPTED" || e.ProcessingStatus == "READY_FOR_RECONCILIATION");
+                summary.DuplicateCount = processedEvents.Count(e => e.ProcessingStatus == "DUPLICATE");
+                summary.RejectedCount = processedEvents.Count(e => e.ProcessingStatus == "REJECTED");
+                summary.ConflictCount = processedEvents.Count(e => e.ProcessingStatus == "CONFLICT" || e.ProcessingStatus == "SEQUENCE_CONFLICT");
+                summary.WaitingForSequenceCount = processedEvents.Count(e => e.ProcessingStatus == "WAITING_FOR_SEQUENCE");
+            }
+
+            // Query Stream States scoped to Tenant
+            if (_streamStateRepository != null)
+            {
+                IReadOnlyList<WorkstationStreamState> streamStates;
+                if (scopedWsIds != null && scopedPcIds != null)
+                {
+                    streamStates = await _streamStateRepository.FindAsync(
+                        s => scopedPcIds.Contains(s.ClientId) || (s.WorkstationId.HasValue && scopedWsIds.Contains(s.WorkstationId.Value)),
+                        track: false,
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    streamStates = await _streamStateRepository.GetAllAsync(track: false, cancellationToken: cancellationToken);
+                }
+
+                summary.TotalStreamStates = streamStates.Count;
+                summary.ActiveSequenceGaps = 0;
+            }
+
+            // Query DLQ Events
+            if (_dlqRepository != null)
+            {
+                string? siteIdStr = effectiveSiteId.HasValue ? effectiveSiteId.Value.ToString() : null;
+                var (dlqItems, totalDlq) = await _dlqRepository.GetPagedAsync(
+                    siteId: siteIdStr,
+                    organizationId: effectiveOrgId,
+                    page: 1,
+                    pageSize: 1000,
+                    cancellationToken: cancellationToken);
+
+                summary.TotalDlqEvents = totalDlq;
+                summary.ActiveDeadLetterCount = dlqItems.Count(d => d.ProcessingStatus == "DEAD_LETTER");
+                summary.RecoveredDlqCount = dlqItems.Count(d => d.ProcessingStatus == "RECOVERED");
+                summary.RejectedDlqCount = dlqItems.Count(d => d.ProcessingStatus == "REJECTED");
+                summary.ExpiredDlqCount = dlqItems.Count(d => d.ProcessingStatus == "EXPIRED");
+
+                var breakdown = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in dlqItems)
+                {
+                    string code = string.IsNullOrWhiteSpace(item.FailureCode) ? "UNKNOWN" : item.FailureCode;
+                    if (!breakdown.ContainsKey(code)) breakdown[code] = 0;
+                    breakdown[code]++;
+                }
+                summary.DlqFailureCodeBreakdown = breakdown;
+            }
+
+            return Result<OfflineOperationalSummaryDto>.Success(summary);
         }
 
         private async Task<Result<bool>> ValidateUserAndPermissionAsync(UserPrincipal principal, string permission, CancellationToken cancellationToken)

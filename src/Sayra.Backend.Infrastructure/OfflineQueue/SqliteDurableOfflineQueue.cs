@@ -20,18 +20,21 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
         private readonly OfflineQueueOptions _options;
         private readonly OfflineRetryPolicyCalculator _retryCalculator;
         private readonly ILogger<SqliteDurableOfflineQueue> _logger;
+        private readonly IOfflineMetrics? _metrics;
         private static readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
 
         public SqliteDurableOfflineQueue(
             SqliteOfflineQueueDbContext dbContext,
             IOptions<OfflineQueueOptions> options,
             ILogger<SqliteDurableOfflineQueue> logger,
-            OfflineRetryPolicyCalculator? retryCalculator = null)
+            OfflineRetryPolicyCalculator? retryCalculator = null,
+            IOfflineMetrics? metrics = null)
         {
             _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
             _options = options?.Value ?? new OfflineQueueOptions();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _retryCalculator = retryCalculator ?? new OfflineRetryPolicyCalculator(new OfflineRetryOptions());
+            _metrics = metrics;
 
             _dbContext.Database.EnsureCreated();
         }
@@ -100,6 +103,7 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                 _dbContext.QueueItems.Add(entity);
                 await _dbContext.SaveChangesAsync(ct);
 
+                _metrics?.RecordQueueEnqueue(entity.EventType, entity.ReliabilityClass);
                 _logger.LogDebug("Successfully enqueued event {EventId} ({EventType}, {ReliabilityClass}) to local queue.",
                     entity.EventId, entity.EventType, entity.ReliabilityClass);
 
@@ -144,6 +148,7 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                 {
                     item.Status = OfflineQueueItemStatus.InFlight;
                     item.LastAttemptAt = nowUtc;
+                    _metrics?.RecordQueueDequeue(item.EventType, item.ReliabilityClass);
                 }
 
                 await _dbContext.SaveChangesAsync(ct);
@@ -250,6 +255,7 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                         item.Status = OfflineQueueItemStatus.Expired;
                         item.ExpiresAt = nowUtc;
                         expiredCount++;
+                        _metrics?.RecordQueueExpiration(item.EventType, item.ReliabilityClass);
                     }
                 }
 
@@ -311,6 +317,8 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                     : null;
 
                 long totalBytes = items.Sum(x => (long)Encoding.UTF8.GetByteCount(x.Payload ?? "{}"));
+
+                _metrics?.RecordQueueState(pendingItems.Count, totalBytes, oldestAgeSec ?? 0.0);
 
                 return new QueueMetricsDto
                 {

@@ -15,16 +15,19 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IOfflineOrderingAndReconciliationEngine _orderingEngine;
         private readonly ILogger<IngestOfflineBatchCommandHandler> _logger;
         private readonly IRedisService? _redisService;
+        private readonly IOfflineMetrics? _metrics;
         private const int MaxBatchItemCount = 100;
 
         public IngestOfflineBatchCommandHandler(
             IOfflineOrderingAndReconciliationEngine orderingEngine,
             ILogger<IngestOfflineBatchCommandHandler> logger,
-            IRedisService? redisService = null)
+            IRedisService? redisService = null,
+            IOfflineMetrics? metrics = null)
         {
             _orderingEngine = orderingEngine ?? throw new ArgumentNullException(nameof(orderingEngine));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _redisService = redisService;
+            _metrics = metrics;
         }
 
         public async Task<Result<IngestOfflineBatchResult>> HandleAsync(IngestOfflineBatchCommand command, CancellationToken cancellationToken = default)
@@ -55,6 +58,7 @@ namespace Sayra.Backend.Application.OfflineQueue
                 _logger.LogWarning("SECURITY ALERT: Offline batch identity mismatch. Connection PcId={AuthPcId}, Payload ClientId={ClientPcId}, WorkstationId={WorkstationPcId}.",
                     authPcId, clientPcId, workstationPcId);
 
+                _metrics?.RecordSecurityRejection("IDENTITY_MISMATCH");
                 ack.ErrorMessage = "SECURITY_VIOLATION: Payload client identity does not match authenticated TCP session identity.";
                 return Result<IngestOfflineBatchResult>.Success(new IngestOfflineBatchResult(ack));
             }
@@ -72,6 +76,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             if (request.Items.Count > MaxBatchItemCount)
             {
                 _logger.LogWarning("Offline batch {BatchId} exceeds maximum items limit ({Count} > {Limit}).", request.BatchId, request.Items.Count, MaxBatchItemCount);
+                _metrics?.RecordSecurityRejection("OVERSIZED_BATCH");
                 ack.ErrorMessage = $"Batch size exceeds maximum limit of {MaxBatchItemCount} items.";
                 return Result<IngestOfflineBatchResult>.Success(new IngestOfflineBatchResult(ack));
             }
@@ -98,6 +103,14 @@ namespace Sayra.Backend.Application.OfflineQueue
                     if (evalResult.IsAcceptedForAck)
                     {
                         acceptedIds.Add(item.EventId);
+                        if (evalResult.ReconciliationStatus == OfflineReconciliationStatus.Duplicate)
+                        {
+                            _metrics?.RecordSyncEventDuplicated(item.EventType);
+                        }
+                        else
+                        {
+                            _metrics?.RecordSyncEventAccepted(item.EventType, item.ReliabilityClass);
+                        }
 
                         // Transient Redis Deduplication Cache (24h TTL)
                         if (_redisService != null)
@@ -109,6 +122,7 @@ namespace Sayra.Backend.Application.OfflineQueue
                             }
                             catch (Exception redisEx)
                             {
+                                _metrics?.RecordInfrastructureFailure("REDIS", "DedupCache");
                                 _logger.LogWarning(redisEx, "Failed to cache event {EventId} in Redis.", item.EventId);
                             }
                         }
@@ -116,6 +130,18 @@ namespace Sayra.Backend.Application.OfflineQueue
                     else
                     {
                         rejectedIds.Add(item.EventId);
+                        if (evalResult.ReconciliationStatus == OfflineReconciliationStatus.Conflict)
+                        {
+                            _metrics?.RecordSyncEventConflicted(item.EventType, evalResult.ReasonCode ?? "CONFLICT");
+                        }
+                        else if (evalResult.ReconciliationStatus == OfflineReconciliationStatus.WaitingForSequence)
+                        {
+                            _metrics?.RecordSyncEventDeferred(item.EventType);
+                        }
+                        else
+                        {
+                            _metrics?.RecordSyncEventRejected(item.EventType, evalResult.ReasonCode ?? "REJECTED");
+                        }
                         ack.ErrorMessage = evalResult.ErrorMessage ?? evalResult.ReasonCode ?? "Item rejected";
                     }
                 }

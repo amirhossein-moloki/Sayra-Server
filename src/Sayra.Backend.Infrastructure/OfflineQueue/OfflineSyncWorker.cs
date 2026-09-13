@@ -17,6 +17,7 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
         private readonly IDurableOfflineQueue _queue;
         private readonly OfflineSyncWorkerOptions _options;
         private readonly ILogger<OfflineSyncWorker> _logger;
+        private readonly IOfflineMetrics? _metrics;
         private readonly SemaphoreSlim _workerLock = new(1, 1);
 
         public bool IsRunning => _workerLock.CurrentCount == 0;
@@ -24,11 +25,13 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
         public OfflineSyncWorker(
             IDurableOfflineQueue queue,
             IOptions<OfflineSyncWorkerOptions> options,
-            ILogger<OfflineSyncWorker> logger)
+            ILogger<OfflineSyncWorker> logger,
+            IOfflineMetrics? metrics = null)
         {
             _queue = queue ?? throw new ArgumentNullException(nameof(queue));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _metrics = metrics;
         }
 
         public async Task<OfflineBatchAcknowledgment?> SynchronizeBatchAsync(
@@ -48,11 +51,15 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
             try
             {
                 _logger.LogDebug("Starting sync batch claim for client {ClientId}, workstation {WorkstationId}...", clientId, workstationId);
+                _metrics?.RecordSyncBatchStarted();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
 
                 var items = await _queue.ClaimBatchAsync(_options.MaxBatchSize, cancellationToken);
                 if (items.Count == 0)
                 {
                     _logger.LogDebug("No eligible offline items to synchronize for client {ClientId}.", clientId);
+                    sw.Stop();
+                    _metrics?.RecordSyncBatchCompleted(sw.Elapsed.TotalSeconds, 0);
                     return new OfflineBatchAcknowledgment
                     {
                         BatchId = Guid.NewGuid().ToString("N"),
@@ -71,6 +78,11 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                     Items = items.Select(MapToContractItem).ToList()
                 };
 
+                foreach (var item in batchRequest.Items)
+                {
+                    _metrics?.RecordSyncEventSubmitted(item.EventType, item.ReliabilityClass);
+                }
+
                 _logger.LogInformation("Constructed offline sync batch {BatchId} with {Count} items for client {ClientId}.",
                     batchId, batchRequest.Items.Count, clientId);
 
@@ -81,14 +93,28 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                 }
                 catch (Exception ex)
                 {
+                    sw.Stop();
+                    _metrics?.RecordSyncBatchFailed("TRANSPORT_FAILURE", sw.Elapsed.TotalSeconds);
                     _logger.LogWarning(ex, "Transport failure during offline batch {BatchId} submission. Preserving items in queue for retry.", batchId);
                     return null;
                 }
 
                 if (ack == null)
                 {
+                    sw.Stop();
+                    _metrics?.RecordSyncBatchFailed("NULL_ACK", sw.Elapsed.TotalSeconds);
                     _logger.LogWarning("Received null ACK for batch {BatchId}. Leaving items in queue for retry.", batchId);
                     return null;
+                }
+
+                sw.Stop();
+                if (ack.Success)
+                {
+                    _metrics?.RecordSyncBatchCompleted(sw.Elapsed.TotalSeconds, items.Count);
+                }
+                else
+                {
+                    _metrics?.RecordSyncBatchFailed("SERVER_REJECTED_BATCH", sw.Elapsed.TotalSeconds);
                 }
 
                 _logger.LogInformation("Processing ACK for batch {BatchId}: Success={Success}, Acknowledged={AckCount}, Rejected={RejCount}",

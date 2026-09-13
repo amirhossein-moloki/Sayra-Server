@@ -21,19 +21,22 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IRepository<AuditEvent> _auditRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<OfflineDlqService> _logger;
+        private readonly IOfflineMetrics? _metrics;
 
         public OfflineDlqService(
             IDeadLetterEventRepository dlqRepository,
             IOfflineOrderingAndReconciliationEngine orderingEngine,
             IRepository<AuditEvent> auditRepository,
             IUnitOfWork unitOfWork,
-            ILogger<OfflineDlqService> logger)
+            ILogger<OfflineDlqService> logger,
+            IOfflineMetrics? metrics = null)
         {
             _dlqRepository = dlqRepository ?? throw new ArgumentNullException(nameof(dlqRepository));
             _orderingEngine = orderingEngine ?? throw new ArgumentNullException(nameof(orderingEngine));
             _auditRepository = auditRepository ?? throw new ArgumentNullException(nameof(auditRepository));
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _metrics = metrics;
         }
 
         public async Task<Result<PagedDlqResponseDto>> GetDlqEventsAsync(
@@ -173,6 +176,8 @@ namespace Sayra.Backend.Application.OfflineQueue
 
             var reconciliationResult = await _orderingEngine.EvaluateAndReconcileAsync(queueItem, dlq.ClientId, dlq.BatchId, cancellationToken);
 
+            _metrics?.RecordDlqProcessingAttempt("RETRY", reconciliationResult.IsAcceptedForAck ? "SUCCESS" : "FAILURE");
+
             if (reconciliationResult.IsAcceptedForAck)
             {
                 dlq.ProcessingStatus = DeadLetterStatus.Recovered;
@@ -253,6 +258,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             await _auditRepository.AddAsync(auditEvent, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+            _metrics?.RecordDlqProcessingAttempt("REJECT", "SUCCESS");
             _logger.LogInformation("DLQ event {EventId} permanently rejected by user {UserId}.", dlq.EventId, principal.UserId);
 
             return Result<DlqEventResponseDto>.Success(MapToDto(dlq));
