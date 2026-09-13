@@ -28,6 +28,7 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IRedisService? _redisService;
         private readonly IDeadLetterEventRepository? _deadLetterRepository;
         private readonly IFailureClassificationService? _failureClassifier;
+        private readonly IOfflineBusinessReconciliationService? _businessReconciliationService;
         private readonly ILogger<OfflineOrderingAndReconciliationEngine> _logger;
 
         private static readonly SemaphoreSlim _concurrencyLock = new(1, 1);
@@ -45,7 +46,8 @@ namespace Sayra.Backend.Application.OfflineQueue
             ILogger<OfflineOrderingAndReconciliationEngine> logger,
             IRedisService? redisService = null,
             IDeadLetterEventRepository? deadLetterRepository = null,
-            IFailureClassificationService? failureClassifier = null)
+            IFailureClassificationService? failureClassifier = null,
+            IOfflineBusinessReconciliationService? businessReconciliationService = null)
         {
             _processedEventRepository = processedEventRepository ?? throw new ArgumentNullException(nameof(processedEventRepository));
             _streamStateRepository = streamStateRepository ?? throw new ArgumentNullException(nameof(streamStateRepository));
@@ -59,6 +61,7 @@ namespace Sayra.Backend.Application.OfflineQueue
             _redisService = redisService;
             _deadLetterRepository = deadLetterRepository;
             _failureClassifier = failureClassifier;
+            _businessReconciliationService = businessReconciliationService;
         }
 
         public async Task<OrderingAndReconciliationResult> EvaluateAndReconcileAsync(
@@ -352,7 +355,28 @@ namespace Sayra.Backend.Application.OfflineQueue
                 }
             }
 
-            // 7. Persist ProcessedEvent record & Audit Entry
+            // 7. Business Reconciliation Integration (Stage 09-07)
+            string? businessErrorMessage = null;
+
+            if (reconciliationStatus == OfflineReconciliationStatus.ReadyForReconciliation && _businessReconciliationService != null)
+            {
+                try
+                {
+                    var bizRes = await _businessReconciliationService.ReconcileAsync(item, workstation, site, batchId, cancellationToken);
+                    reconciliationStatus = bizRes.Status;
+                    reasonCode = bizRes.ReasonCode;
+                    businessErrorMessage = bizRes.ErrorMessage;
+                }
+                catch (Exception bizEx)
+                {
+                    _logger.LogError(bizEx, "Error during business reconciliation for event {EventId}.", item.EventId);
+                    reconciliationStatus = OfflineReconciliationStatus.Conflict;
+                    reasonCode = "BUSINESS_RECONCILIATION_ERROR";
+                    businessErrorMessage = bizEx.Message;
+                }
+            }
+
+            // 8. Persist ProcessedEvent record & Audit Entry
             var processedEvent = new ProcessedEvent
             {
                 EventId = eventGuid,
@@ -366,11 +390,12 @@ namespace Sayra.Backend.Application.OfflineQueue
                 ProcessingStatus = reconciliationStatus,
                 PayloadHash = payloadHash,
                 ReasonCode = reasonCode,
+                ErrorMessage = businessErrorMessage,
                 OccurredAt = occurredAt,
                 FirstReceivedAt = now,
                 LastReceivedAt = now,
                 ProcessedAt = now,
-                ReconciledAt = reconciliationStatus == OfflineReconciliationStatus.ReadyForReconciliation ? now : null
+                ReconciledAt = (reconciliationStatus == OfflineReconciliationStatus.Accepted || reconciliationStatus == OfflineReconciliationStatus.ReadyForReconciliation) ? now : null
             };
 
             await _processedEventRepository.AddAsync(processedEvent, cancellationToken);
@@ -393,7 +418,8 @@ namespace Sayra.Backend.Application.OfflineQueue
                     expectedSequence = expectedSequence,
                     orderingStatus = orderingStatus,
                     reconciliationStatus = reconciliationStatus,
-                    reasonCode = reasonCode
+                    reasonCode = reasonCode,
+                    errorMessage = businessErrorMessage
                 })
             };
 
@@ -423,7 +449,7 @@ namespace Sayra.Backend.Application.OfflineQueue
                     OfflineReasonCode.StaleSequence, "Duplicate event processed concurrently.", isAcceptedForAck: true);
             }
 
-            // 8. Gap Resolution Check: If this event was IN_ORDER, unblock any waiting events in the sequence pipeline!
+            // 9. Gap Resolution Check: If this event was IN_ORDER, unblock any waiting events in the sequence pipeline!
             if (isStrictlyOrdered && orderingStatus == OfflineOrderingStatus.InOrder)
             {
                 await ResolveWaitingGapEventsAsync(authPcId, workstation.Id, cancellationToken);
@@ -436,10 +462,10 @@ namespace Sayra.Backend.Application.OfflineQueue
 
             if (!isAcceptedForAck)
             {
-                await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, reasonCode, "Event reconciliation failed", cancellationToken);
+                await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, reasonCode, businessErrorMessage ?? "Event reconciliation failed", cancellationToken);
             }
 
-            return CreateResult(item.EventId, orderingStatus, reconciliationStatus, reasonCode, null, isAcceptedForAck, processedEvent, expectedSequence, receivedSequence);
+            return CreateResult(item.EventId, orderingStatus, reconciliationStatus, reasonCode, businessErrorMessage, isAcceptedForAck, processedEvent, expectedSequence, receivedSequence);
         }
 
         private async Task TryRecordDeadLetterAsync(
