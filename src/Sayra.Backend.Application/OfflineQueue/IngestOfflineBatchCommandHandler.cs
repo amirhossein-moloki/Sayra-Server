@@ -116,12 +116,14 @@ namespace Sayra.Backend.Application.OfflineQueue
                     else
                     {
                         rejectedIds.Add(item.EventId);
+                        ack.ErrorMessage = evalResult.ErrorMessage ?? evalResult.ReasonCode ?? "Item rejected";
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing event {EventId} in batch {BatchId}.", item.EventId, request.BatchId);
                     rejectedIds.Add(item.EventId);
+                    ack.ErrorMessage = ex.Message;
                 }
             }
 

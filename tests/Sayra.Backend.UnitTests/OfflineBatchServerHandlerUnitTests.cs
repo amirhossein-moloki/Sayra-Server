@@ -29,18 +29,6 @@ namespace Sayra.Backend.UnitTests
         {
             var db = CreateInMemoryDbContext(dbName);
 
-            if (!db.Sites.Any(s => s.SiteId == "SITE-001"))
-            {
-                db.Sites.Add(new Site { SiteId = "SITE-001", Code = "SITE-001", Name = "Main Site", OrganizationId = Guid.NewGuid(), Status = "Active" });
-            }
-
-            if (!db.Workstations.Any(w => w.PcId == "PC-001"))
-            {
-                db.Workstations.Add(new Workstation { PcId = "PC-001", SiteId = "SITE-001", Name = "PC-001" });
-            }
-
-            db.SaveChanges();
-
             var processedEventRepo = new ProcessedEventRepository(db);
             var streamStateRepo = new WorkstationStreamStateRepository(db);
             var workstationRepo = new Repository<Workstation>(db);
@@ -67,6 +55,21 @@ namespace Sayra.Backend.UnitTests
             return (handler, db);
         }
 
+        private void SeedWorkstation(ApplicationDbContext db)
+        {
+            if (!db.Sites.Any(s => s.SiteId == "SITE-001"))
+            {
+                db.Sites.Add(new Site { SiteId = "SITE-001", Code = "SITE-001", Name = "Main Site", OrganizationId = Guid.NewGuid(), Status = "Active" });
+            }
+
+            if (!db.Workstations.Any(w => w.PcId == "PC-001"))
+            {
+                db.Workstations.Add(new Workstation { PcId = "PC-001", SiteId = "SITE-001", Name = "PC-001" });
+            }
+
+            db.SaveChanges();
+        }
+
         [Fact]
         public async Task HandleAsync_IdentityMismatch_RejectsWithSecurityViolation()
         {
@@ -74,6 +77,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var req = new OfflineBatchRequest
                 {
                     BatchId = Guid.NewGuid().ToString("N"),
@@ -103,6 +107,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var id1 = Guid.NewGuid().ToString("D");
                 var id2 = Guid.NewGuid().ToString("D");
 
@@ -144,6 +149,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var eventId = Guid.NewGuid().ToString("D");
                 var req = new OfflineBatchRequest
                 {
@@ -182,6 +188,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var eventId = Guid.NewGuid().ToString("D");
                 var req1 = new OfflineBatchRequest
                 {
@@ -228,6 +235,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var validId = Guid.NewGuid().ToString("D");
                 var invalidId = "not-a-valid-guid";
 
@@ -262,6 +270,7 @@ namespace Sayra.Backend.UnitTests
             var (handler, db) = CreateHandler(dbName);
             using (db)
             {
+                SeedWorkstation(db);
                 var items = new List<OfflineQueueItem>();
                 for (int i = 0; i < 101; i++)
                 {
@@ -291,13 +300,9 @@ namespace Sayra.Backend.UnitTests
         {
             var dbName = Guid.NewGuid().ToString();
 
-            // Seed initial DB workstation & site
-            using (var seedDb = CreateInMemoryDbContext(dbName))
-            {
-                seedDb.Sites.Add(new Site { SiteId = "SITE-001", Code = "SITE-001", Name = "Main Site", OrganizationId = Guid.NewGuid(), Status = "Active" });
-                seedDb.Workstations.Add(new Workstation { PcId = "PC-001", SiteId = "SITE-001", Name = "PC-001" });
-                seedDb.SaveChanges();
-            }
+            // Seed initial DB workstation & site safely and keep seedDb open so EF In-Memory DB is not disposed
+            using var seedDb = CreateInMemoryDbContext(dbName);
+            SeedWorkstation(seedDb);
 
             var sharedEventId = Guid.NewGuid().ToString("D");
             var req = new OfflineBatchRequest
@@ -315,12 +320,12 @@ namespace Sayra.Backend.UnitTests
             for (int i = 0; i < 5; i++)
             {
                 int connectionId = i;
-                tasks.Add(Task.Run(() =>
+                tasks.Add(Task.Run(async () =>
                 {
                     var (handler, threadDb) = CreateHandler(dbName);
                     using (threadDb)
                     {
-                        return handler.HandleAsync(new IngestOfflineBatchCommand($"conn-{connectionId}", "PC-001", req));
+                        return await handler.HandleAsync(new IngestOfflineBatchCommand($"conn-{connectionId}", "PC-001", req));
                     }
                 }));
             }
@@ -331,11 +336,11 @@ namespace Sayra.Backend.UnitTests
             {
                 Assert.True(res.IsSuccess);
                 Assert.True(res.Value.Acknowledgment.Success);
-                Assert.Contains(sharedEventId, res.Value.Acknowledgment.AcknowledgedEventIds);
+                Assert.True(res.Value.Acknowledgment.AcknowledgedEventIds.Contains(sharedEventId),
+                    $"ACK error message: '{res.Value.Acknowledgment.ErrorMessage}', ProcessedCount: {res.Value.Acknowledgment.ProcessedCount}, RejectedCount: {res.Value.Acknowledgment.RejectedEventIds.Count}");
             }
 
-            using var verifyDb = CreateInMemoryDbContext(dbName);
-            var count = await verifyDb.ProcessedEvents.CountAsync(e => e.EventId == Guid.Parse(sharedEventId));
+            var count = await seedDb.ProcessedEvents.CountAsync(e => e.EventId == Guid.Parse(sharedEventId));
             Assert.Equal(1, count);
         }
     }

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -19,17 +18,20 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
     {
         private readonly SqliteOfflineQueueDbContext _dbContext;
         private readonly OfflineQueueOptions _options;
+        private readonly OfflineRetryPolicyCalculator _retryCalculator;
         private readonly ILogger<SqliteDurableOfflineQueue> _logger;
         private static readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
 
         public SqliteDurableOfflineQueue(
             SqliteOfflineQueueDbContext dbContext,
             IOptions<OfflineQueueOptions> options,
-            ILogger<SqliteDurableOfflineQueue> logger)
+            ILogger<SqliteDurableOfflineQueue> logger,
+            OfflineRetryPolicyCalculator? retryCalculator = null)
         {
             _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
             _options = options?.Value ?? new OfflineQueueOptions();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _retryCalculator = retryCalculator ?? new OfflineRetryPolicyCalculator(new OfflineRetryOptions());
 
             _dbContext.Database.EnsureCreated();
         }
@@ -121,8 +123,9 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
             await _lock.WaitAsync(ct);
             try
             {
+                DateTime nowUtc = DateTime.UtcNow;
                 var pendingCandidates = await _dbContext.QueueItems
-                    .Where(x => x.Status == OfflineQueueItemStatus.Pending)
+                    .Where(x => x.Status == OfflineQueueItemStatus.Pending && (x.NextAttemptAt == null || x.NextAttemptAt <= nowUtc))
                     .ToListAsync(ct);
 
                 var orderedItems = pendingCandidates
@@ -137,7 +140,6 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
                     return Array.Empty<DurableQueueItemEntity>();
                 }
 
-                DateTime nowUtc = DateTime.UtcNow;
                 foreach (var item in orderedItems)
                 {
                     item.Status = OfflineQueueItemStatus.InFlight;
@@ -181,6 +183,11 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
 
         public async Task MarkFailedAsync(string eventId, string errorReason, bool isPermanent = false, CancellationToken ct = default)
         {
+            await ScheduleRetryOrDeadLetterAsync(eventId, errorReason, isPermanent, null, ct);
+        }
+
+        public async Task ScheduleRetryOrDeadLetterAsync(string eventId, string errorReason, bool isPermanent, TimeSpan? backoffDelay = null, CancellationToken ct = default)
+        {
             if (string.IsNullOrWhiteSpace(eventId)) return;
 
             await _lock.WaitAsync(ct);
@@ -191,10 +198,29 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
 
                 if (item != null)
                 {
+                    DateTime nowUtc = DateTime.UtcNow;
                     item.RetryCount++;
-                    item.LastAttemptAt = DateTime.UtcNow;
+                    item.LastAttemptAt = nowUtc;
                     item.LastError = errorReason;
-                    item.Status = isPermanent ? OfflineQueueItemStatus.Failed : OfflineQueueItemStatus.Pending;
+
+                    bool isExhausted = _retryCalculator.IsRetryExhausted(item.RetryCount);
+
+                    if (isPermanent || isExhausted)
+                    {
+                        item.Status = OfflineQueueItemStatus.Failed;
+                        item.ExpiresAt = nowUtc;
+                        _logger.LogWarning("Event {EventId} permanently failed or exhausted retries ({Count}/{Max}). Status set to FAILED.",
+                            eventId, item.RetryCount, _retryCalculator.MaxRetryCount);
+                    }
+                    else
+                    {
+                        item.Status = OfflineQueueItemStatus.Pending;
+                        TimeSpan delay = backoffDelay ?? _retryCalculator.CalculateNextAttemptDelay(item.RetryCount);
+                        item.NextAttemptAt = nowUtc.Add(delay);
+
+                        _logger.LogInformation("Event {EventId} retry scheduled ({Count}/{Max}) after backoff {Delay}s. NextAttemptAt={NextAttemptAt}.",
+                            eventId, item.RetryCount, _retryCalculator.MaxRetryCount, delay.TotalSeconds, item.NextAttemptAt);
+                    }
 
                     await _dbContext.SaveChangesAsync(ct);
                 }
@@ -326,9 +352,6 @@ namespace Sayra.Backend.Infrastructure.OfflineQueue
             _logger.LogWarning("Queue capacity threshold reached (Count={Count}/{MaxCount}, Size={Size}/{MaxSize}). Applying overflow eviction policy for incoming {ReliabilityClass} event.",
                 activeItems.Count, _options.MaxItemCount, currentTotalBytes, _options.MaxStorageSizeBytes, incomingReliabilityClass);
 
-            // Eviction strategy:
-            // 1. Evict NORMAL items oldest first.
-            // 2. If incoming is CRITICAL or IMPORTANT and still overflowing, evict IMPORTANT items oldest first (only if incoming is CRITICAL).
             var normalCandidates = activeItems
                 .Where(x => string.Equals(x.ReliabilityClass, EventReliabilityClass.Normal, StringComparison.OrdinalIgnoreCase) && x.Status == OfflineQueueItemStatus.Pending)
                 .OrderBy(x => x.OccurredAt)
