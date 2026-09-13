@@ -26,8 +26,11 @@ namespace Sayra.Backend.Application.OfflineQueue
         private readonly IUnitOfWork _unitOfWork;
         private readonly OfflineOrderingOptions _options;
         private readonly IRedisService? _redisService;
+        private readonly IDeadLetterEventRepository? _deadLetterRepository;
+        private readonly IFailureClassificationService? _failureClassifier;
         private readonly ILogger<OfflineOrderingAndReconciliationEngine> _logger;
 
+        private static readonly SemaphoreSlim _concurrencyLock = new(1, 1);
         private const int MaxSinglePayloadBytes = 256 * 1024; // 256 KB
 
         public OfflineOrderingAndReconciliationEngine(
@@ -40,7 +43,9 @@ namespace Sayra.Backend.Application.OfflineQueue
             IUnitOfWork unitOfWork,
             IOptions<OfflineOrderingOptions> options,
             ILogger<OfflineOrderingAndReconciliationEngine> logger,
-            IRedisService? redisService = null)
+            IRedisService? redisService = null,
+            IDeadLetterEventRepository? deadLetterRepository = null,
+            IFailureClassificationService? failureClassifier = null)
         {
             _processedEventRepository = processedEventRepository ?? throw new ArgumentNullException(nameof(processedEventRepository));
             _streamStateRepository = streamStateRepository ?? throw new ArgumentNullException(nameof(streamStateRepository));
@@ -52,6 +57,8 @@ namespace Sayra.Backend.Application.OfflineQueue
             _options = options?.Value ?? new OfflineOrderingOptions();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _redisService = redisService;
+            _deadLetterRepository = deadLetterRepository;
+            _failureClassifier = failureClassifier;
         }
 
         public async Task<OrderingAndReconciliationResult> EvaluateAndReconcileAsync(
@@ -62,14 +69,57 @@ namespace Sayra.Backend.Application.OfflineQueue
         {
             if (item == null) throw new ArgumentNullException(nameof(item));
 
+            await _concurrencyLock.WaitAsync(cancellationToken);
+            try
+            {
+                return await EvaluateAndReconcileInternalAsync(item, authenticatedPcId, batchId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error evaluating event {EventId} in batch {BatchId}.", item.EventId, batchId);
+
+                if (Guid.TryParse(item.EventId, out var eventGuid))
+                {
+                    try
+                    {
+                        var existing = await _processedEventRepository.GetByEventIdAsync(eventGuid, false, cancellationToken);
+                        if (existing != null)
+                        {
+                            return CreateResult(item.EventId, OfflineOrderingStatus.Duplicate, OfflineReconciliationStatus.Duplicate,
+                                OfflineReasonCode.StaleSequence, "Duplicate event processed concurrently.", isAcceptedForAck: true, existing);
+                        }
+                    }
+                    catch
+                    {
+                        // Fallback
+                    }
+                }
+
+                return CreateResult(item.EventId, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
+                    OfflineReasonCode.MalformedPayload, ex.Message, isAcceptedForAck: false);
+            }
+            finally
+            {
+                _concurrencyLock.Release();
+            }
+        }
+
+        private async Task<OrderingAndReconciliationResult> EvaluateAndReconcileInternalAsync(
+            OfflineQueueItem item,
+            string authenticatedPcId,
+            string batchId,
+            CancellationToken cancellationToken)
+        {
             string authPcId = authenticatedPcId?.Trim().ToUpperInvariant() ?? string.Empty;
 
             // 1. Basic Envelope & Identity Mismatch Check
             if (string.IsNullOrEmpty(item.EventId) || !Guid.TryParse(item.EventId, out var eventGuid))
             {
                 _logger.LogWarning("Rejecting offline event in batch {BatchId}: Invalid or missing EventId '{EventId}'.", batchId, item.EventId);
-                return CreateResult(item.EventId ?? string.Empty, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
+                var res = CreateResult(item.EventId ?? string.Empty, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
                     OfflineReasonCode.MalformedPayload, "Invalid or missing EventId.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, null, null, null, batchId, res.ReasonCode ?? "MALFORMED_PAYLOAD", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
             // Extract payload & payload hash
@@ -79,8 +129,10 @@ namespace Sayra.Backend.Application.OfflineQueue
             if (payloadBytes.Length > MaxSinglePayloadBytes)
             {
                 _logger.LogWarning("Rejecting offline event {EventId} in batch {BatchId}: Payload exceeds 256 KB limit.", item.EventId, batchId);
-                return CreateResult(item.EventId, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
+                var res = CreateResult(item.EventId, OfflineOrderingStatus.Unordered, OfflineReconciliationStatus.Rejected,
                     OfflineReasonCode.MalformedPayload, "Payload exceeds 256 KB limit.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, null, null, null, batchId, res.ReasonCode ?? "MALFORMED_PAYLOAD", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
             string payloadHash = ComputeSha256(payloadBytes);
@@ -92,8 +144,10 @@ namespace Sayra.Backend.Application.OfflineQueue
                 _logger.LogWarning("SECURITY ALERT: Offline event {EventId} identity mismatch. Connection PcId={AuthPcId}, Payload identity={PayloadClientId}.",
                     item.EventId, authPcId, payloadClientId);
 
-                return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Rejected,
+                var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Rejected,
                     OfflineReasonCode.IdentityMismatch, "Payload client identity does not match authenticated TCP session identity.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, null, null, null, batchId, res.ReasonCode ?? "IDENTITY_MISMATCH", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
             // 2. Authoritative Workstation & Site Lookup
@@ -101,19 +155,24 @@ namespace Sayra.Backend.Application.OfflineQueue
             if (workstation == null)
             {
                 _logger.LogWarning("CONFLICT ALERT: Offline event {EventId} references non-existent workstation PcId={AuthPcId}.", item.EventId, authPcId);
-                return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
+                var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
                     OfflineReasonCode.WorkstationNotFound, "Workstation does not exist on authoritative server.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, null, null, null, batchId, res.ReasonCode ?? "WORKSTATION_NOT_FOUND", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
+            Site? site = null;
             if (!string.IsNullOrWhiteSpace(workstation.SiteId))
             {
-                var site = await _siteRepository.FirstOrDefaultAsync(s => s.SiteId == workstation.SiteId || s.Code == workstation.SiteId, false, cancellationToken);
+                site = await _siteRepository.FirstOrDefaultAsync(s => s.SiteId == workstation.SiteId || s.Code == workstation.SiteId, false, cancellationToken);
                 if (site != null && !site.CanOperate())
                 {
                     _logger.LogWarning("CONFLICT ALERT: Offline event {EventId} references inactive site {SiteId} for workstation PcId={AuthPcId}.",
                         item.EventId, workstation.SiteId, authPcId);
-                    return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
+                    var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
                         OfflineReasonCode.SiteMismatch, "Workstation site is inactive.", isAcceptedForAck: false);
+                    await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site.OrganizationId, batchId, res.ReasonCode ?? "SITE_MISMATCH", res.ErrorMessage!, cancellationToken);
+                    return res;
                 }
             }
 
@@ -126,8 +185,10 @@ namespace Sayra.Backend.Application.OfflineQueue
                 _logger.LogWarning("Clock skew violation for event {EventId}: OccurredAt {OccurredAt} is in future (> {MaxSkew}m ahead of server time).",
                     item.EventId, occurredAt, _options.MaxFutureClockSkewMinutes);
 
-                return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Invalid,
+                var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Invalid,
                     OfflineReasonCode.FutureTimestampClockSkew, "Event timestamp violates maximum allowed future clock skew.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, res.ReasonCode ?? "FUTURE_TIMESTAMP_CLOCK_SKEW", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
             string reliabilityClass = string.IsNullOrWhiteSpace(item.ReliabilityClass) ? EventReliabilityClass.Normal : item.ReliabilityClass.Trim().ToUpperInvariant();
@@ -138,8 +199,10 @@ namespace Sayra.Backend.Application.OfflineQueue
                 _logger.LogWarning("Retention expiration for event {EventId} ({Class}): OccurredAt {OccurredAt} exceeds retention threshold {Limit}.",
                     item.EventId, reliabilityClass, occurredAt, retentionLimit);
 
-                return CreateResult(item.EventId, OfflineOrderingStatus.Stale, OfflineReconciliationStatus.Expired,
+                var res = CreateResult(item.EventId, OfflineOrderingStatus.Stale, OfflineReconciliationStatus.Expired,
                     OfflineReasonCode.ExpiredRetention, $"Event timestamp exceeds {reliabilityClass} retention limit.", isAcceptedForAck: false);
+                await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, res.ReasonCode ?? "EXPIRED_RETENTION", res.ErrorMessage!, cancellationToken);
+                return res;
             }
 
             // 4. Session Reference Validation
@@ -150,8 +213,10 @@ namespace Sayra.Backend.Application.OfflineQueue
                 if (session == null)
                 {
                     _logger.LogWarning("CONFLICT ALERT: Offline event {EventId} references non-existent session {SessionId}.", item.EventId, payloadSessionId);
-                    return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
+                    var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
                         OfflineReasonCode.InvalidSessionReference, "Referenced session does not exist.", isAcceptedForAck: false);
+                    await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, res.ReasonCode ?? "INVALID_SESSION_REFERENCE", res.ErrorMessage!, cancellationToken);
+                    return res;
                 }
             }
 
@@ -167,7 +232,15 @@ namespace Sayra.Backend.Application.OfflineQueue
                     existingEvent.ProcessingStatus = OfflineReconciliationStatus.Duplicate;
                     existingEvent.OrderingStatus = OfflineOrderingStatus.Duplicate;
                     existingEvent.ReasonCode = OfflineReasonCode.StaleSequence;
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Concurrency exception during duplicate event update for {EventId}. Returning idempotent ACK.", item.EventId);
+                    }
 
                     return CreateResult(item.EventId, OfflineOrderingStatus.Duplicate, OfflineReconciliationStatus.Duplicate,
                         OfflineReasonCode.StaleSequence, "Duplicate event already processed.", isAcceptedForAck: true, existingEvent);
@@ -181,10 +254,20 @@ namespace Sayra.Backend.Application.OfflineQueue
                     existingEvent.OrderingStatus = OfflineOrderingStatus.SequenceConflict;
                     existingEvent.ReasonCode = OfflineReasonCode.PayloadHashConflict;
                     existingEvent.ErrorMessage = "Conflicting payload hash for existing EventId.";
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                    return CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Concurrency exception during conflict event update for {EventId}.", item.EventId);
+                    }
+
+                    var res = CreateResult(item.EventId, OfflineOrderingStatus.SequenceConflict, OfflineReconciliationStatus.Conflict,
                         OfflineReasonCode.PayloadHashConflict, "Conflicting payload hash for existing EventId.", isAcceptedForAck: false, existingEvent);
+                    await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, res.ReasonCode ?? "PAYLOAD_HASH_CONFLICT", res.ErrorMessage!, cancellationToken);
+                    return res;
                 }
             }
 
@@ -316,8 +399,29 @@ namespace Sayra.Backend.Application.OfflineQueue
 
             await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
 
-            // Save Db context changes transactionally
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                // Save Db context changes transactionally
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "DbUpdateException or ConcurrencyException hit for EventId {EventId} during SaveChangesAsync.", item.EventId);
+
+                for (int retry = 0; retry < 3; retry++)
+                {
+                    var duplicateEvt = await _processedEventRepository.GetByEventIdAsync(eventGuid, false, cancellationToken);
+                    if (duplicateEvt != null)
+                    {
+                        return CreateResult(item.EventId, OfflineOrderingStatus.Duplicate, OfflineReconciliationStatus.Duplicate,
+                            OfflineReasonCode.StaleSequence, "Duplicate event processed concurrently.", isAcceptedForAck: true, duplicateEvt);
+                    }
+                    await Task.Delay(10, cancellationToken);
+                }
+
+                return CreateResult(item.EventId, OfflineOrderingStatus.Duplicate, OfflineReconciliationStatus.Duplicate,
+                    OfflineReasonCode.StaleSequence, "Duplicate event processed concurrently.", isAcceptedForAck: true);
+            }
 
             // 8. Gap Resolution Check: If this event was IN_ORDER, unblock any waiting events in the sequence pipeline!
             if (isStrictlyOrdered && orderingStatus == OfflineOrderingStatus.InOrder)
@@ -330,7 +434,85 @@ namespace Sayra.Backend.Application.OfflineQueue
                                    reconciliationStatus == OfflineReconciliationStatus.WaitingForSequence ||
                                    reconciliationStatus == OfflineReconciliationStatus.Duplicate;
 
+            if (!isAcceptedForAck)
+            {
+                await TryRecordDeadLetterAsync(item, authPcId, workstation.Id, workstation.SiteId, site?.OrganizationId, batchId, reasonCode, "Event reconciliation failed", cancellationToken);
+            }
+
             return CreateResult(item.EventId, orderingStatus, reconciliationStatus, reasonCode, null, isAcceptedForAck, processedEvent, expectedSequence, receivedSequence);
+        }
+
+        private async Task TryRecordDeadLetterAsync(
+            OfflineQueueItem item,
+            string clientId,
+            Guid? workstationId,
+            string? siteId,
+            Guid? organizationId,
+            string batchId,
+            string failureCode,
+            string failureReason,
+            CancellationToken cancellationToken)
+        {
+            if (_deadLetterRepository == null) return;
+            if (!Guid.TryParse(item.EventId, out var eventGuid)) return;
+
+            try
+            {
+                var existingDlq = await _deadLetterRepository.GetByEventIdAsync(eventGuid, cancellationToken);
+                if (existingDlq == null)
+                {
+                    string payloadText = item.Payload is JsonElement elem ? elem.GetRawText() : (item.Payload?.ToString() ?? "{}");
+                    var dlq = new DeadLetterEvent
+                    {
+                        EventId = eventGuid,
+                        BatchId = batchId,
+                        ClientId = clientId,
+                        WorkstationId = workstationId,
+                        SiteId = siteId,
+                        OrganizationId = organizationId,
+                        EventType = item.EventType ?? "UNKNOWN",
+                        SequenceNumber = item.SequenceNumber,
+                        ReliabilityClass = item.ReliabilityClass ?? "NORMAL",
+                        Payload = payloadText,
+                        FailureCode = failureCode,
+                        FailureReason = failureReason,
+                        RetryCount = 1,
+                        FirstSeenAt = DateTime.UtcNow,
+                        LastAttemptAt = DateTime.UtcNow,
+                        DeadLetteredAt = DateTime.UtcNow,
+                        CorrelationId = batchId,
+                        ProcessingStatus = failureCode == OfflineReasonCode.ExpiredRetention ? DeadLetterStatus.Expired : DeadLetterStatus.DeadLetter
+                    };
+
+                    await _deadLetterRepository.AddAsync(dlq, cancellationToken);
+
+                    var auditEvent = new AuditEvent
+                    {
+                        EventId = Guid.NewGuid(),
+                        EventType = "OFFLINE_EVENT_DLQ",
+                        WorkstationId = workstationId,
+                        CorrelationId = batchId,
+                        Priority = 1,
+                        Timestamp = DateTime.UtcNow,
+                        Payload = JsonSerializer.Serialize(new
+                        {
+                            eventId = item.EventId,
+                            eventType = item.EventType,
+                            clientId = clientId,
+                            failureCode = failureCode,
+                            failureReason = failureReason,
+                            deadLetteredAt = dlq.DeadLetteredAt
+                        })
+                    };
+
+                    await _auditEventRepository.AddAsync(auditEvent, cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist DeadLetterEvent for EventId {EventId}.", item.EventId);
+            }
         }
 
         private async Task ResolveWaitingGapEventsAsync(string clientId, Guid workstationId, CancellationToken cancellationToken)
