@@ -55,9 +55,11 @@ namespace Sayra.Backend.Infrastructure.Persistence
         public async Task<IReadOnlyList<CommunicationSession>> GetActiveSessionsAsync(CancellationToken cancellationToken = default)
         {
             return await _context.CommunicationSessions
+                .AsNoTracking()
                 .Where(s => s.State == ConnectionLifecycleState.Active
                          || s.State == ConnectionLifecycleState.Degraded
                          || s.State == ConnectionLifecycleState.Authenticated)
+                .Take(5000)
                 .ToListAsync(cancellationToken);
         }
     }

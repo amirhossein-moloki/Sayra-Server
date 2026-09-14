@@ -36,6 +36,7 @@ Welcome to the **SAYRA Central Backend** documentation knowledge base. This docu
 * **[Phase 10 Stage 10-01 Production Readiness Baseline](operations/phase10-stage10-01-production-readiness-baseline.md)**: Evidence-based production baseline, runtime inventory, dependency map, PostgreSQL & Redis audits, worker inventory, failure classification, and Phase 10 implementation backlog.
 * **[Application Resilience Policy](operations/app-resilience-policy.md)**: Canonical policy defining failure classification, retry safety model, circuit breaker rules, timeout strategy, backoff with jitter, nested retry prevention, and OpenTelemetry observability.
 * **[Phase 10 Stage 10-02 Application Resilience Report](operations/phase10-stage10-02-application-resilience-report.md)**: Implementation evidence, Stage 10-01 baseline reconciliation matrix, dependency resilience matrix, retry storm audit, and Stage 10-03 readiness determination.
+* **[Phase 10 Stage 10-03 Database Reliability Report](operations/phase10-stage10-03-database-reliability-report.md)**: Hardening report covering PostgreSQL connection pooling, DbContext lifetimes, query bounds, transaction boundaries, optimistic concurrency tokens, database constraints, migration safety, and stage gate sign-off.
 
 ### 7. 📜 [Architectural Decision Records (ADRs)](decisions/index.md)
 * **[ADR Index](decisions/index.md)**: Record of 12 foundational engineering decisions:

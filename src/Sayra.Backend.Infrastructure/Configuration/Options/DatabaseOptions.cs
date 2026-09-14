@@ -6,6 +6,8 @@ namespace Sayra.Backend.Infrastructure.Configuration.Options
 
         public string ConnectionString { get; set; } = string.Empty;
         public int MaxPoolSize { get; set; } = 100;
+        public int CommandTimeoutSeconds { get; set; } = 15;
+        public int ConnectionTimeoutSeconds { get; set; } = 15;
         public bool EnableSensitiveDataLogging { get; set; } = false;
     }
 }

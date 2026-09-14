@@ -44,6 +44,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
                             e.ProcessingStatus == "WAITING_FOR_SEQUENCE" &&
                             e.SequenceNumber == expectedSequence)
                 .OrderBy(e => e.SequenceNumber)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
     }

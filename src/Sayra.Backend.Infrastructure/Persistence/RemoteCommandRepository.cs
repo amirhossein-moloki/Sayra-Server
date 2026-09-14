@@ -35,6 +35,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
             return await _dbContext.RemoteCommands
                 .Where(c => c.TargetWorkstationId == workstationId && (c.Status == "CREATED" || c.Status == "QUEUED" || c.Status == "SENDING"))
                 .OrderBy(c => c.CreatedAt)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
 
@@ -45,6 +46,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
             return await _dbContext.RemoteCommands
                 .Where(c => c.TargetPcId == normalized && !RemoteCommand.IsTerminalState(c.Status))
                 .OrderBy(c => c.CreatedAt)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
 
@@ -52,6 +54,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         {
             return await _dbContext.RemoteCommands
                 .Where(c => !RemoteCommand.IsTerminalState(c.Status) && c.ExpiresAt != null && c.ExpiresAt <= cutoffTime)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
 
@@ -59,6 +62,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         {
             return await _dbContext.RemoteCommands
                 .Where(c => (c.Status == "SENDING" || c.Status == "QUEUED" || c.Status == "CREATED") && c.CreatedAt <= cutoffTime)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
 
@@ -66,6 +70,7 @@ namespace Sayra.Backend.Infrastructure.Persistence
         {
             return await _dbContext.RemoteCommands
                 .Where(c => (c.Status == "DELIVERED" || c.Status == "ACKNOWLEDGED" || c.Status == "EXECUTING") && c.DeliveredAt != null && c.DeliveredAt <= cutoffTime)
+                .Take(1000)
                 .ToListAsync(cancellationToken);
         }
 
