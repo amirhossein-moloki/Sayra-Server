@@ -94,6 +94,12 @@ namespace Sayra.Backend.Application.Security
             if (envelope == null) throw new ArgumentNullException(nameof(envelope));
             if (sessionKey == null || sessionKey.Length != 32) throw new ArgumentException("SessionKey must be 32 bytes.", nameof(sessionKey));
 
+            // 0. Validate Payload Length before expensive HMAC or decryption
+            if (!string.IsNullOrEmpty(envelope.Payload) && envelope.Payload.Length > MaxPayloadLengthBytes)
+            {
+                return Fail("PAYLOAD_LIMIT_EXCEEDED", $"Payload length ({envelope.Payload.Length} bytes) exceeds maximum allowed limit.");
+            }
+
             // 1. Validate Protocol Version
             if (!string.IsNullOrWhiteSpace(envelope.ProtocolVersion) && envelope.ProtocolVersion != "1.0")
             {

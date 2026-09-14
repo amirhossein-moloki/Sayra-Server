@@ -1,7 +1,10 @@
 using System;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -54,11 +57,78 @@ namespace Sayra.Backend.Api
                 var discoveryOptions = builder.Configuration.GetSection(DiscoveryOptions.SectionName).Get<DiscoveryOptions>() ?? new DiscoveryOptions();
                 var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
                 var resilienceOptions = builder.Configuration.GetSection(ResilienceOptions.SectionName).Get<ResilienceOptions>() ?? new ResilienceOptions();
+                var rateLimitingOptions = builder.Configuration.GetSection(RateLimitingOptions.SectionName).Get<RateLimitingOptions>() ?? new RateLimitingOptions();
 
                 ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions, securityOptions, resilienceOptions);
+                ConfigurationValidator.ValidateRateLimitingOptions(rateLimitingOptions);
 
                 // Add Infrastructure dependencies
                 builder.Services.AddInfrastructure(builder.Configuration);
+
+                // Configure Rate Limiting Middleware
+                builder.Services.AddRateLimiter(options =>
+                {
+                    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                    options.OnRejected = async (context, cancellationToken) =>
+                    {
+                        var transportMetrics = context.HttpContext.RequestServices.GetService<Sayra.Backend.Application.Abstractions.Transport.ITransportMetrics>();
+                        string path = context.HttpContext.Request.Path.ToString();
+                        transportMetrics?.RecordHttpRateLimitRejected(path, "RateLimiter");
+
+                        context.HttpContext.Response.ContentType = "application/json";
+                        await context.HttpContext.Response.WriteAsync("{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded. Please retry later.\"}", cancellationToken);
+                    };
+
+                    options.AddPolicy("GlobalPolicy", httpContext =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = rateLimitingOptions.GlobalPermitLimit,
+                                Window = TimeSpan.FromSeconds(rateLimitingOptions.WindowSeconds),
+                                QueueLimit = rateLimitingOptions.QueueLimit
+                            }));
+
+                    options.AddPolicy("AuthPolicy", httpContext =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = rateLimitingOptions.AuthPermitLimit,
+                                Window = TimeSpan.FromSeconds(rateLimitingOptions.WindowSeconds),
+                                QueueLimit = rateLimitingOptions.QueueLimit
+                            }));
+
+                    options.AddPolicy("ConfigSyncPolicy", httpContext =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = rateLimitingOptions.ConfigSyncPermitLimit,
+                                Window = TimeSpan.FromSeconds(rateLimitingOptions.WindowSeconds),
+                                QueueLimit = rateLimitingOptions.QueueLimit
+                            }));
+
+                    options.AddPolicy("UpdateManifestPolicy", httpContext =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = rateLimitingOptions.UpdateManifestPermitLimit,
+                                Window = TimeSpan.FromSeconds(rateLimitingOptions.WindowSeconds),
+                                QueueLimit = rateLimitingOptions.QueueLimit
+                            }));
+
+                    options.AddPolicy("UpdateDownloadPolicy", httpContext =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            factory: _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = rateLimitingOptions.UpdateDownloadPermitLimit,
+                                Window = TimeSpan.FromSeconds(rateLimitingOptions.WindowSeconds),
+                                QueueLimit = rateLimitingOptions.QueueLimit
+                            }));
+                });
 
                 // Configure Controllers with camelCase serialization
                 builder.Services.AddControllers()
@@ -97,6 +167,8 @@ namespace Sayra.Backend.Api
                 }
 
                 app.UseRouting();
+
+                app.UseRateLimiter();
 
                 // User Principal Resolution Middleware
                 app.UseMiddleware<UserPrincipalMiddleware>();

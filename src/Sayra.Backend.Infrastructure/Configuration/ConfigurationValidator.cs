@@ -39,6 +39,21 @@ namespace Sayra.Backend.Infrastructure.Configuration
             if (serverOptions.MaximumConnections < 1)
                 throw new InvalidOperationException($"Invalid configuration 'Server:MaximumConnections': {serverOptions.MaximumConnections}. Must be at least 1.");
 
+            if (serverOptions.MaxConnectionsPerIp < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:MaxConnectionsPerIp': {serverOptions.MaxConnectionsPerIp}. Must be at least 1.");
+
+            if (serverOptions.MaxUnauthenticatedConnections < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:MaxUnauthenticatedConnections': {serverOptions.MaxUnauthenticatedConnections}. Must be at least 1.");
+
+            if (serverOptions.MaxConcurrentAuthentications < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:MaxConcurrentAuthentications': {serverOptions.MaxConcurrentAuthentications}. Must be at least 1.");
+
+            if (serverOptions.SendTimeoutSeconds < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:SendTimeoutSeconds': {serverOptions.SendTimeoutSeconds}. Must be at least 1 second.");
+
+            if (serverOptions.ReadTimeoutSeconds < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Server:ReadTimeoutSeconds': {serverOptions.ReadTimeoutSeconds}. Must be at least 1 second.");
+
             if (serverOptions.ReceiveBufferSize < 1024)
                 throw new InvalidOperationException($"Invalid configuration 'Server:ReceiveBufferSize': {serverOptions.ReceiveBufferSize}. Must be at least 1024 bytes.");
 
@@ -85,6 +100,30 @@ namespace Sayra.Backend.Infrastructure.Configuration
             {
                 ValidateResilienceOptions(resilienceOptions);
             }
+        }
+
+        public static void ValidateRateLimitingOptions(RateLimitingOptions rateLimitingOptions)
+        {
+            if (rateLimitingOptions == null)
+                throw new InvalidOperationException("Configuration section 'RateLimiting' is missing.");
+
+            if (rateLimitingOptions.GlobalPermitLimit < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:GlobalPermitLimit: {rateLimitingOptions.GlobalPermitLimit}. Must be at least 1.");
+
+            if (rateLimitingOptions.AuthPermitLimit < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:AuthPermitLimit: {rateLimitingOptions.AuthPermitLimit}. Must be at least 1.");
+
+            if (rateLimitingOptions.ConfigSyncPermitLimit < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:ConfigSyncPermitLimit: {rateLimitingOptions.ConfigSyncPermitLimit}. Must be at least 1.");
+
+            if (rateLimitingOptions.UpdateManifestPermitLimit < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:UpdateManifestPermitLimit: {rateLimitingOptions.UpdateManifestPermitLimit}. Must be at least 1.");
+
+            if (rateLimitingOptions.UpdateDownloadPermitLimit < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:UpdateDownloadPermitLimit: {rateLimitingOptions.UpdateDownloadPermitLimit}. Must be at least 1.");
+
+            if (rateLimitingOptions.WindowSeconds < 1)
+                throw new InvalidOperationException($"Invalid RateLimiting:WindowSeconds: {rateLimitingOptions.WindowSeconds}. Must be at least 1.");
         }
 
         public static void ValidateResilienceOptions(ResilienceOptions resilienceOptions)

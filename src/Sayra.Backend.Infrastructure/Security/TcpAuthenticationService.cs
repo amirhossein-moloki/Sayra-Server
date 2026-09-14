@@ -25,23 +25,32 @@ namespace Sayra.Backend.Infrastructure.Security
     public class TcpAuthenticationService : ITcpAuthenticationService
     {
         private readonly IClientAuthenticationService _clientAuthenticationService;
+        private readonly ITcpConnectionRegistry? _connectionRegistry;
         private readonly IRedisService _redisService;
         private readonly ITcpSessionManager? _sessionManager;
         private readonly ServerOptions _serverOptions;
+        private readonly ITransportMetrics? _transportMetrics;
         private readonly ILogger<TcpAuthenticationService> _logger;
+        private readonly SemaphoreSlim _authSemaphore;
 
         public TcpAuthenticationService(
             IClientAuthenticationService clientAuthenticationService,
             IRedisService redisService,
             ILogger<TcpAuthenticationService> logger,
             IOptions<ServerOptions>? serverOptions = null,
-            ITcpSessionManager? sessionManager = null)
+            ITcpSessionManager? sessionManager = null,
+            ITcpConnectionRegistry? connectionRegistry = null,
+            ITransportMetrics? transportMetrics = null)
         {
             _clientAuthenticationService = clientAuthenticationService ?? throw new ArgumentNullException(nameof(clientAuthenticationService));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _serverOptions = serverOptions?.Value ?? new ServerOptions();
             _sessionManager = sessionManager;
+            _connectionRegistry = connectionRegistry;
+            _transportMetrics = transportMetrics;
+            int maxAuth = _serverOptions.MaxConcurrentAuthentications > 0 ? _serverOptions.MaxConcurrentAuthentications : 50;
+            _authSemaphore = new SemaphoreSlim(maxAuth, maxAuth);
         }
 
         public async Task<bool> AuthenticateAsync(ITcpConnection connection, CancellationToken cancellationToken)
@@ -59,6 +68,17 @@ namespace Sayra.Backend.Infrastructure.Security
                 return false;
             }
 
+            if (!_authSemaphore.Wait(0))
+            {
+                _transportMetrics?.RecordAuthenticationRejected("MaxConcurrentAuthenticationsExceeded");
+                _logger.LogWarning("AUTHENTICATION_REJECTED: Connection {ConnectionId} rejected because authentication capacity ({Limit}) is full.",
+                    connection.ConnectionId, _serverOptions.MaxConcurrentAuthentications);
+
+                await SendAuthStatusAndCloseAsync(connection, stream, "AUTH_FAILED", "Authentication capacity exceeded", cancellationToken);
+                return false;
+            }
+
+            _transportMetrics?.RecordAuthenticationConcurrencyDelta(1);
             bool isSuccess = false;
             try
             {
@@ -130,6 +150,27 @@ namespace Sayra.Backend.Infrastructure.Security
                     return false;
                 }
 
+                // Handle duplicate workstation connection replacement
+                if (!string.IsNullOrEmpty(connection.PcId) && _connectionRegistry != null)
+                {
+                    var existingConn = _connectionRegistry.GetByPcId(connection.PcId);
+                    if (existingConn != null && existingConn.ConnectionId != connection.ConnectionId)
+                    {
+                        _logger.LogInformation("DUPLICATE_WORKSTATION_CONNECTION: PC-ID {PcId} connected on connection {NewConnId}. Replacing existing connection {OldConnId}.",
+                            connection.PcId, connection.ConnectionId, existingConn.ConnectionId);
+
+                        if (_sessionManager != null)
+                        {
+                            await _sessionManager.HandleDisconnectAsync(existingConn.ConnectionId, "Replaced by new connection", cts.Token);
+                        }
+                        else
+                        {
+                            await existingConn.DisconnectAsync(cts.Token);
+                            _connectionRegistry.Unregister(existingConn.ConnectionId);
+                        }
+                    }
+                }
+
                 _logger.LogInformation("AUTHENTICATION_SUCCEEDED: Connection {ConnectionId} successfully authenticated. Device PC-ID: {PcId}.", connection.ConnectionId, connection.PcId);
 
                 // 5. Send success AUTH_STATUS to client
@@ -192,6 +233,9 @@ namespace Sayra.Backend.Infrastructure.Security
             }
             finally
             {
+                _transportMetrics?.RecordAuthenticationConcurrencyDelta(-1);
+                _authSemaphore.Release();
+
                 if (!isSuccess)
                 {
                     _clientAuthenticationService.CleanupSession(connection.ConnectionId);
@@ -238,7 +282,7 @@ namespace Sayra.Backend.Infrastructure.Security
 
         private static async Task<string?> ReadLineWithLimitAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
         {
-            var ms = new MemoryStream();
+            using var ms = new MemoryStream(256);
             int totalBytes = 0;
             byte[] singleBuffer = new byte[1];
 

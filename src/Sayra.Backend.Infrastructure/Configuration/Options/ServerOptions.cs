@@ -11,6 +11,11 @@ namespace Sayra.Backend.Infrastructure.Configuration.Options
         public int HandshakeTimeout { get; set; } = 15;
         public int ConnectionTimeout { get; set; } = 300;
         public int MaximumConnections { get; set; } = 1000;
+        public int MaxConnectionsPerIp { get; set; } = 50;
+        public int MaxUnauthenticatedConnections { get; set; } = 100;
+        public int MaxConcurrentAuthentications { get; set; } = 50;
+        public int SendTimeoutSeconds { get; set; } = 10;
+        public int ReadTimeoutSeconds { get; set; } = 30;
         public int ReceiveBufferSize { get; set; } = 8192;
         public int SendBufferSize { get; set; } = 8192;
         public int MaximumMessageSize { get; set; } = 65536;
