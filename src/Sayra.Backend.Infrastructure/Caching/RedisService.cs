@@ -15,12 +15,17 @@ namespace Sayra.Backend.Infrastructure.Caching
         private readonly IConnectionMultiplexer _connectionMultiplexer;
         private readonly IDatabase _database;
         private readonly ILogger<RedisService> _logger;
+        private readonly Sayra.Backend.Application.Resilience.IResiliencePipeline? _resiliencePipeline;
 
-        public RedisService(IConnectionMultiplexer connectionMultiplexer, ILogger<RedisService> logger)
+        public RedisService(
+            IConnectionMultiplexer connectionMultiplexer,
+            ILogger<RedisService> logger,
+            Sayra.Backend.Application.Resilience.IResiliencePipeline? resiliencePipeline = null)
         {
             _connectionMultiplexer = connectionMultiplexer ?? throw new ArgumentNullException(nameof(connectionMultiplexer));
             _database = _connectionMultiplexer.GetDatabase();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _resiliencePipeline = resiliencePipeline;
         }
 
         public async Task<string?> GetStringAsync(string key, CancellationToken cancellationToken = default)
@@ -28,6 +33,15 @@ namespace Sayra.Backend.Infrastructure.Caching
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_resiliencePipeline != null)
+                {
+                    return await _resiliencePipeline.ExecuteAsync(async ct =>
+                    {
+                        var val = await _database.StringGetAsync(key);
+                        return val.HasValue ? val.ToString() : null;
+                    }, Sayra.Backend.Application.Resilience.OperationRetrySafety.SafeRead, "Redis", "GetString", cancellationToken);
+                }
+
                 var value = await _database.StringGetAsync(key);
                 return value.HasValue ? value.ToString() : null;
             }
@@ -48,6 +62,16 @@ namespace Sayra.Backend.Infrastructure.Caching
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_resiliencePipeline != null)
+                {
+                    await _resiliencePipeline.ExecuteAsync(async ct =>
+                    {
+                        await _database.StringSetAsync(key, value, expiry);
+                        return true;
+                    }, Sayra.Backend.Application.Resilience.OperationRetrySafety.IdempotentWrite, "Redis", "SetString", cancellationToken);
+                    return;
+                }
+
                 await _database.StringSetAsync(key, value, expiry);
             }
             catch (OperationCanceledException)
@@ -111,12 +135,25 @@ namespace Sayra.Backend.Infrastructure.Caching
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                long newValue = await _database.StringIncrementAsync(key);
-                if (expiry.HasValue && newValue == 1)
+                if (_resiliencePipeline != null)
+                {
+                    return await _resiliencePipeline.ExecuteAsync(async ct =>
+                    {
+                        long newValue = await _database.StringIncrementAsync(key);
+                        if (expiry.HasValue && newValue == 1)
+                        {
+                            await _database.KeyExpireAsync(key, expiry.Value);
+                        }
+                        return newValue;
+                    }, Sayra.Backend.Application.Resilience.OperationRetrySafety.IdempotentWrite, "Redis", "Increment", cancellationToken);
+                }
+
+                long val = await _database.StringIncrementAsync(key);
+                if (expiry.HasValue && val == 1)
                 {
                     await _database.KeyExpireAsync(key, expiry.Value);
                 }
-                return newValue;
+                return val;
             }
             catch (Exception ex)
             {
@@ -130,6 +167,13 @@ namespace Sayra.Backend.Infrastructure.Caching
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_resiliencePipeline != null)
+                {
+                    return await _resiliencePipeline.ExecuteAsync(async ct =>
+                        await _database.KeyDeleteAsync(key),
+                        Sayra.Backend.Application.Resilience.OperationRetrySafety.IdempotentWrite, "Redis", "Remove", cancellationToken);
+                }
+
                 return await _database.KeyDeleteAsync(key);
             }
             catch (OperationCanceledException)

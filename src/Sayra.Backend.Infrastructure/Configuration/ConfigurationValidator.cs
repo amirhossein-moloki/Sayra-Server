@@ -72,6 +72,51 @@ namespace Sayra.Backend.Infrastructure.Configuration
             }
         }
 
+        public static void Validate(
+            DatabaseOptions databaseOptions,
+            RedisOptions redisOptions,
+            ServerOptions serverOptions,
+            DiscoveryOptions discoveryOptions,
+            SecurityOptions securityOptions,
+            ResilienceOptions resilienceOptions)
+        {
+            Validate(databaseOptions, redisOptions, serverOptions, discoveryOptions, securityOptions);
+            if (resilienceOptions != null)
+            {
+                ValidateResilienceOptions(resilienceOptions);
+            }
+        }
+
+        public static void ValidateResilienceOptions(ResilienceOptions resilienceOptions)
+        {
+            if (resilienceOptions == null)
+                throw new InvalidOperationException("Configuration section 'Resilience' is missing.");
+
+            if (resilienceOptions.MaxRetryAttempts < 0 || resilienceOptions.MaxRetryAttempts > 10)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:MaxRetryAttempts': {resilienceOptions.MaxRetryAttempts}. Must be between 0 and 10.");
+
+            if (resilienceOptions.InitialBackoffSeconds <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:InitialBackoffSeconds': {resilienceOptions.InitialBackoffSeconds}. Must be greater than 0.");
+
+            if (resilienceOptions.MaxBackoffSeconds < resilienceOptions.InitialBackoffSeconds)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:MaxBackoffSeconds': {resilienceOptions.MaxBackoffSeconds}. Must be >= InitialBackoffSeconds.");
+
+            if (resilienceOptions.JitterFactor < 0 || resilienceOptions.JitterFactor > 1.0)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:JitterFactor': {resilienceOptions.JitterFactor}. Must be between 0 and 1.0.");
+
+            if (resilienceOptions.OverallTimeoutSeconds <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:OverallTimeoutSeconds': {resilienceOptions.OverallTimeoutSeconds}. Must be greater than 0.");
+
+            if (resilienceOptions.AttemptTimeoutSeconds <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:AttemptTimeoutSeconds': {resilienceOptions.AttemptTimeoutSeconds}. Must be greater than 0.");
+
+            if (resilienceOptions.CircuitBreakerFailureThreshold < 1)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:CircuitBreakerFailureThreshold': {resilienceOptions.CircuitBreakerFailureThreshold}. Must be at least 1.");
+
+            if (resilienceOptions.CircuitBreakerBreakDurationSeconds <= 0)
+                throw new InvalidOperationException($"Invalid configuration 'Resilience:CircuitBreakerBreakDurationSeconds': {resilienceOptions.CircuitBreakerBreakDurationSeconds}. Must be greater than 0.");
+        }
+
         public static void ValidateSecurityOptions(SecurityOptions securityOptions)
         {
             if (securityOptions == null)

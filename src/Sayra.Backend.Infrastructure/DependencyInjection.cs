@@ -50,6 +50,11 @@ namespace Sayra.Backend.Infrastructure
             services.Configure<OfflineQueueOptions>(configuration.GetSection(OfflineQueueOptions.SectionName));
             services.Configure<OfflineSyncWorkerOptions>(configuration.GetSection("OfflineSyncWorker"));
             services.Configure<OfflineOrderingOptions>(configuration.GetSection(OfflineOrderingOptions.SectionName));
+            services.Configure<ResilienceOptions>(configuration.GetSection(ResilienceOptions.SectionName));
+
+            // Resilience Abstractions & Observability Setup
+            services.AddSingleton<Sayra.Backend.Application.Resilience.IResilienceMetrics, Sayra.Backend.Infrastructure.Diagnostics.ResilienceMetrics>();
+            services.AddSingleton<Sayra.Backend.Application.Resilience.IResiliencePipeline, Sayra.Backend.Infrastructure.Resilience.ResiliencePipeline>();
 
             // 2. Database Foundation Setup
             var offlineQueueOptions = configuration.GetSection(OfflineQueueOptions.SectionName).Get<OfflineQueueOptions>() ?? new OfflineQueueOptions();
