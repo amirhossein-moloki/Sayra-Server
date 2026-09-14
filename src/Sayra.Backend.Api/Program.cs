@@ -53,8 +53,9 @@ namespace Sayra.Backend.Api
                 var serverOptions = builder.Configuration.GetSection(ServerOptions.SectionName).Get<ServerOptions>() ?? new ServerOptions();
                 var discoveryOptions = builder.Configuration.GetSection(DiscoveryOptions.SectionName).Get<DiscoveryOptions>() ?? new DiscoveryOptions();
                 var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
+                var resilienceOptions = builder.Configuration.GetSection(ResilienceOptions.SectionName).Get<ResilienceOptions>() ?? new ResilienceOptions();
 
-                ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions, securityOptions);
+                ConfigurationValidator.Validate(dbOptions, redisOptions, serverOptions, discoveryOptions, securityOptions, resilienceOptions);
 
                 // Add Infrastructure dependencies
                 builder.Services.AddInfrastructure(builder.Configuration);

@@ -17,12 +17,15 @@ namespace Sayra.Backend.Infrastructure.Updates
         private const int StreamBufferSize = 65536; // 64 KB buffer
         private readonly string _baseStoragePath;
         private readonly ILogger<LocalUpdateArtifactStorage> _logger;
+        private readonly Sayra.Backend.Application.Resilience.IResiliencePipeline? _resiliencePipeline;
 
         public LocalUpdateArtifactStorage(
             IOptions<UpdatesOptions> options,
-            ILogger<LocalUpdateArtifactStorage> logger)
+            ILogger<LocalUpdateArtifactStorage> logger,
+            Sayra.Backend.Application.Resilience.IResiliencePipeline? resiliencePipeline = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _resiliencePipeline = resiliencePipeline;
 
             if (options?.Value == null)
             {
@@ -135,20 +138,38 @@ namespace Sayra.Backend.Infrastructure.Updates
             return Task.FromResult(stream);
         }
 
-        public Task<bool> ExistsAsync(string storageKey, CancellationToken cancellationToken = default)
+        public async Task<bool> ExistsAsync(string storageKey, CancellationToken cancellationToken = default)
         {
             var physicalPath = ResolvePhysicalPath(storageKey);
-            return Task.FromResult(File.Exists(physicalPath));
+            if (_resiliencePipeline != null)
+            {
+                return await _resiliencePipeline.ExecuteAsync(
+                    async ct => File.Exists(physicalPath),
+                    Sayra.Backend.Application.Resilience.OperationRetrySafety.SafeRead,
+                    "FileStorage",
+                    "Exists",
+                    cancellationToken);
+            }
+            return File.Exists(physicalPath);
         }
 
-        public Task DeleteArtifactAsync(string storageKey, CancellationToken cancellationToken = default)
+        public async Task DeleteArtifactAsync(string storageKey, CancellationToken cancellationToken = default)
         {
             var physicalPath = ResolvePhysicalPath(storageKey);
+            if (_resiliencePipeline != null)
+            {
+                await _resiliencePipeline.ExecuteAsync(
+                    async ct => TryDeletePhysicalFile(physicalPath),
+                    Sayra.Backend.Application.Resilience.OperationRetrySafety.IdempotentWrite,
+                    "FileStorage",
+                    "DeleteArtifact",
+                    cancellationToken);
+                return;
+            }
             TryDeletePhysicalFile(physicalPath);
-            return Task.CompletedTask;
         }
 
-        public Task<long> GetArtifactSizeAsync(string storageKey, CancellationToken cancellationToken = default)
+        public async Task<long> GetArtifactSizeAsync(string storageKey, CancellationToken cancellationToken = default)
         {
             var physicalPath = ResolvePhysicalPath(storageKey);
 
@@ -157,8 +178,18 @@ namespace Sayra.Backend.Infrastructure.Updates
                 throw new InvalidDomainException("ARTIFACT_NOT_FOUND", $"Artifact '{storageKey}' was not found on local storage.");
             }
 
+            if (_resiliencePipeline != null)
+            {
+                return await _resiliencePipeline.ExecuteAsync(
+                    async ct => new FileInfo(physicalPath).Length,
+                    Sayra.Backend.Application.Resilience.OperationRetrySafety.SafeRead,
+                    "FileStorage",
+                    "GetArtifactSize",
+                    cancellationToken);
+            }
+
             var fileInfo = new FileInfo(physicalPath);
-            return Task.FromResult(fileInfo.Length);
+            return fileInfo.Length;
         }
 
         private string ResolvePhysicalPath(string storageKey)
