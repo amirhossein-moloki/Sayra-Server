@@ -97,6 +97,10 @@ namespace Sayra.Backend.Infrastructure
                 options.UseNpgsql(dbConnectionString, npgsqlOptions =>
                 {
                     npgsqlOptions.EnableRetryOnFailure(3);
+                    if (dbOptions.CommandTimeoutSeconds > 0)
+                    {
+                        npgsqlOptions.CommandTimeout(dbOptions.CommandTimeoutSeconds);
+                    }
                 });
             });
 

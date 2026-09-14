@@ -46,6 +46,9 @@ namespace Sayra.Backend.Infrastructure.Persistence
             int pageSize = 50,
             CancellationToken cancellationToken = default)
         {
+            pageSize = Math.Clamp(pageSize, 1, 500);
+            page = Math.Max(1, page);
+
             var query = _dbContext.DeadLetterEvents.AsNoTracking().AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(clientId))
