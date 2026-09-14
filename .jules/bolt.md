@@ -1,0 +1,3 @@
+## 2026-09-09 - Zero-Allocation Canonical JSON Streaming
+**Learning:** `CanonicalConfigurationSerializer` previously constructed `SortedDictionary<string, object?>` and `List<object?>` DOM trees with boxed primitives on every canonicalization pass, then serialized via `JsonSerializer.Serialize` and converted strings to UTF-8 bytes. Streaming directly with `Utf8JsonWriter`, `ArrayBufferWriter<byte>`, and `List<JsonProperty>.Sort` eliminates dictionary tree allocations, primitive boxing, and double serialization.
+**Action:** When canonicalizing or sorting JSON keys for cryptographic hashing/signing, stream directly with `Utf8JsonWriter` over `IBufferWriter<byte>` rather than constructing intermediate `IDictionary<string, object>` trees.

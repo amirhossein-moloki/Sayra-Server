@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -12,11 +13,18 @@ namespace Sayra.Backend.Application.Configuration
     /// <summary>
     /// Production implementation of deterministic canonical configuration serializer.
     /// Sorts all JSON object keys recursively using StringComparer.Ordinal, preserves
-    /// semantic array element ordering, and outputs compact UTF-8 JSON bytes.
+    /// semantic array element ordering, and streams compact UTF-8 JSON bytes with
+    /// zero/low allocations.
     /// </summary>
     public class CanonicalConfigurationSerializer : ICanonicalConfigurationSerializer
     {
-        private static readonly JsonSerializerOptions CanonicalOptions = new JsonSerializerOptions
+        private static readonly JsonWriterOptions WriterOptions = new JsonWriterOptions
+        {
+            Indented = false,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        private static readonly JsonSerializerOptions GeneralOptions = new JsonSerializerOptions
         {
             WriteIndented = false,
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -37,16 +45,43 @@ namespace Sayra.Backend.Application.Configuration
 
             if (modelOrPayload is SayraConfigurationSchema schema)
             {
-                var dict = ConvertSchemaToSortedMap(schema);
-                return JsonSerializer.Serialize(dict, CanonicalOptions);
+                byte[] bytes = SerializeSchemaToCanonicalBytes(schema);
+                return Encoding.UTF8.GetString(bytes);
             }
 
             // Convert general object to JsonDocument and then process recursively
-            string raw = JsonSerializer.Serialize(modelOrPayload, CanonicalOptions);
+            string raw = JsonSerializer.Serialize(modelOrPayload, GeneralOptions);
             return SerializeToCanonicalJson(raw);
         }
 
         public string SerializeToCanonicalJson(string rawJsonPayload)
+        {
+            byte[] bytes = SerializeToCanonicalBytes(rawJsonPayload);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        public byte[] SerializeToCanonicalBytes(object modelOrPayload)
+        {
+            if (modelOrPayload == null)
+            {
+                throw new ArgumentNullException(nameof(modelOrPayload));
+            }
+
+            if (modelOrPayload is string jsonString)
+            {
+                return SerializeToCanonicalBytes(jsonString);
+            }
+
+            if (modelOrPayload is SayraConfigurationSchema schema)
+            {
+                return SerializeSchemaToCanonicalBytes(schema);
+            }
+
+            string raw = JsonSerializer.Serialize(modelOrPayload, GeneralOptions);
+            return SerializeToCanonicalBytes(raw);
+        }
+
+        public byte[] SerializeToCanonicalBytes(string rawJsonPayload)
         {
             if (string.IsNullOrWhiteSpace(rawJsonPayload))
             {
@@ -54,115 +89,123 @@ namespace Sayra.Backend.Application.Configuration
             }
 
             using var doc = JsonDocument.Parse(rawJsonPayload);
-            var canonicalObject = NormalizeElement(doc.RootElement);
+            var bufferWriter = new ArrayBufferWriter<byte>(1024);
+            using (var writer = new Utf8JsonWriter(bufferWriter, WriterOptions))
+            {
+                WriteCanonicalElement(doc.RootElement, writer);
+            }
 
-            return JsonSerializer.Serialize(canonicalObject, CanonicalOptions);
+            return bufferWriter.WrittenSpan.ToArray();
         }
 
-        public byte[] SerializeToCanonicalBytes(object modelOrPayload)
-        {
-            string json = SerializeToCanonicalJson(modelOrPayload);
-            return Encoding.UTF8.GetBytes(json);
-        }
-
-        public byte[] SerializeToCanonicalBytes(string rawJsonPayload)
-        {
-            string json = SerializeToCanonicalJson(rawJsonPayload);
-            return Encoding.UTF8.GetBytes(json);
-        }
-
-        private static object? NormalizeElement(JsonElement element)
+        private static void WriteCanonicalElement(JsonElement element, Utf8JsonWriter writer)
         {
             switch (element.ValueKind)
             {
                 case JsonValueKind.Object:
-                    var sortedMap = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+                    writer.WriteStartObject();
+                    var properties = new List<JsonProperty>(8);
                     foreach (var prop in element.EnumerateObject())
                     {
-                        sortedMap[prop.Name] = NormalizeElement(prop.Value);
+                        properties.Add(prop);
                     }
-                    return sortedMap;
+
+                    if (properties.Count > 0)
+                    {
+                        properties.Sort(JsonPropertyNameComparer.Instance);
+                        for (int i = 0; i < properties.Count; i++)
+                        {
+                            writer.WritePropertyName(properties[i].Name);
+                            WriteCanonicalElement(properties[i].Value, writer);
+                        }
+                    }
+                    writer.WriteEndObject();
+                    break;
 
                 case JsonValueKind.Array:
-                    var list = new List<object?>();
+                    writer.WriteStartArray();
                     foreach (var item in element.EnumerateArray())
                     {
-                        list.Add(NormalizeElement(item));
+                        WriteCanonicalElement(item, writer);
                     }
-                    return list;
+                    writer.WriteEndArray();
+                    break;
 
                 case JsonValueKind.String:
-                    return element.GetString();
-
                 case JsonValueKind.Number:
-                    if (element.TryGetInt64(out long longValue))
-                    {
-                        return longValue;
-                    }
-                    if (element.TryGetDecimal(out decimal decimalValue))
-                    {
-                        return decimalValue;
-                    }
-                    return element.GetDouble();
-
                 case JsonValueKind.True:
-                    return true;
-
                 case JsonValueKind.False:
-                    return false;
-
                 case JsonValueKind.Null:
                 case JsonValueKind.Undefined:
                 default:
-                    return null;
+                    element.WriteTo(writer);
+                    break;
             }
         }
 
-        private static SortedDictionary<string, object?> ConvertSchemaToSortedMap(SayraConfigurationSchema schema)
+        private static byte[] SerializeSchemaToCanonicalBytes(SayraConfigurationSchema schema)
         {
-            return new SortedDictionary<string, object?>(StringComparer.Ordinal)
+            var bufferWriter = new ArrayBufferWriter<byte>(512);
+            using (var writer = new Utf8JsonWriter(bufferWriter, WriterOptions))
             {
-                ["version"] = schema.Version?.Trim() ?? string.Empty,
+                writer.WriteStartObject();
 
-                ["discovery"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["enabled"] = schema.Discovery.Enabled,
-                    ["port"] = schema.Discovery.Port
-                },
+                // 1. discovery
+                writer.WriteStartObject("discovery");
+                writer.WriteBoolean("enabled", schema.Discovery.Enabled);
+                writer.WriteNumber("port", schema.Discovery.Port);
+                writer.WriteEndObject();
 
-                ["heartbeat"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["intervalSeconds"] = schema.Heartbeat.IntervalSeconds,
-                    ["timeoutSeconds"] = schema.Heartbeat.TimeoutSeconds
-                },
+                // 2. heartbeat
+                writer.WriteStartObject("heartbeat");
+                writer.WriteNumber("intervalSeconds", schema.Heartbeat.IntervalSeconds);
+                writer.WriteNumber("timeoutSeconds", schema.Heartbeat.TimeoutSeconds);
+                writer.WriteEndObject();
 
-                ["kiosk"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["allowShellEscape"] = schema.Kiosk.AllowShellEscape,
-                    ["autoLoginGamer"] = schema.Kiosk.AutoLoginGamer,
-                    ["enabled"] = schema.Kiosk.Enabled,
-                    ["idleTimeoutMinutes"] = schema.Kiosk.IdleTimeoutMinutes
-                },
+                // 3. kiosk
+                writer.WriteStartObject("kiosk");
+                writer.WriteBoolean("allowShellEscape", schema.Kiosk.AllowShellEscape);
+                writer.WriteBoolean("autoLoginGamer", schema.Kiosk.AutoLoginGamer);
+                writer.WriteBoolean("enabled", schema.Kiosk.Enabled);
+                writer.WriteNumber("idleTimeoutMinutes", schema.Kiosk.IdleTimeoutMinutes);
+                writer.WriteEndObject();
 
-                ["localization"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["culture"] = schema.Localization.Culture?.Trim() ?? string.Empty,
-                    ["timeZone"] = schema.Localization.TimeZone?.Trim() ?? string.Empty
-                },
+                // 4. localization
+                writer.WriteStartObject("localization");
+                writer.WriteString("culture", schema.Localization.Culture?.Trim() ?? string.Empty);
+                writer.WriteString("timeZone", schema.Localization.TimeZone?.Trim() ?? string.Empty);
+                writer.WriteEndObject();
 
-                ["security"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["enableSsl"] = schema.Security.EnableSsl,
-                    ["maxFailedAttempts"] = schema.Security.MaxFailedAttempts,
-                    ["requireEncryption"] = schema.Security.RequireEncryption
-                },
+                // 5. security
+                writer.WriteStartObject("security");
+                writer.WriteBoolean("enableSsl", schema.Security.EnableSsl);
+                writer.WriteNumber("maxFailedAttempts", schema.Security.MaxFailedAttempts);
+                writer.WriteBoolean("requireEncryption", schema.Security.RequireEncryption);
+                writer.WriteEndObject();
 
-                ["server"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["ipAddress"] = schema.Server.IpAddress?.Trim() ?? string.Empty,
-                    ["port"] = schema.Server.Port
-                }
-            };
+                // 6. server
+                writer.WriteStartObject("server");
+                writer.WriteString("ipAddress", schema.Server.IpAddress?.Trim() ?? string.Empty);
+                writer.WriteNumber("port", schema.Server.Port);
+                writer.WriteEndObject();
+
+                // 7. version
+                writer.WriteString("version", schema.Version?.Trim() ?? string.Empty);
+
+                writer.WriteEndObject();
+            }
+
+            return bufferWriter.WrittenSpan.ToArray();
+        }
+
+        private sealed class JsonPropertyNameComparer : IComparer<JsonProperty>
+        {
+            public static readonly JsonPropertyNameComparer Instance = new JsonPropertyNameComparer();
+
+            public int Compare(JsonProperty x, JsonProperty y)
+            {
+                return string.Compare(x.Name, y.Name, StringComparison.Ordinal);
+            }
         }
     }
 }
