@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
@@ -69,26 +70,80 @@ namespace Sayra.Backend.Infrastructure.Telemetry
         public async Task PerformAggregationCycleAsync(CancellationToken cancellationToken)
         {
             AggregationRunsCounter.Add(1);
+            var sw = Stopwatch.StartNew();
+            bool isSuccess = true;
+            using var scope = _scopeFactory.CreateScope();
+            var workerMetrics = scope.ServiceProvider.GetService<Sayra.Backend.Application.Abstractions.Diagnostics.IWorkerMetrics>();
+
             try
             {
-                using var scope = _scopeFactory.CreateScope();
+                workerMetrics?.RecordWorkerActiveState(nameof(TelemetryAggregationWorker), true);
+
                 var historyRepo = scope.ServiceProvider.GetRequiredService<ITelemetryHistoryRepository>();
                 var aggregateRepo = scope.ServiceProvider.GetRequiredService<ITelemetryAggregateRepository>();
                 var aggregationService = scope.ServiceProvider.GetRequiredService<ITelemetryAggregationService>();
 
                 // Process 1m raw -> 1m aggregate
-                await ProcessRawTo1mAggregatesAsync(historyRepo, aggregateRepo, aggregationService, cancellationToken);
+                try
+                {
+                    await ProcessRawTo1mAggregatesAsync(historyRepo, aggregateRepo, aggregationService, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex1m)
+                {
+                    workerMetrics?.RecordWorkerError(nameof(TelemetryAggregationWorker), ex1m.GetType().Name);
+                    _logger.LogError(ex1m, "Error occurred during 1m raw telemetry aggregation.");
+                }
 
                 // Process 1m -> 5m rollups
-                await ProcessRollupsAsync(aggregateRepo, aggregationService, "1m", "5m", cancellationToken);
+                try
+                {
+                    await ProcessRollupsAsync(aggregateRepo, aggregationService, "1m", "5m", cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex5m)
+                {
+                    workerMetrics?.RecordWorkerError(nameof(TelemetryAggregationWorker), ex5m.GetType().Name);
+                    _logger.LogError(ex5m, "Error occurred during 5m telemetry rollup aggregation.");
+                }
 
                 // Process 5m -> 1h rollups
-                await ProcessRollupsAsync(aggregateRepo, aggregationService, "5m", "1h", cancellationToken);
+                try
+                {
+                    await ProcessRollupsAsync(aggregateRepo, aggregationService, "5m", "1h", cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex1h)
+                {
+                    workerMetrics?.RecordWorkerError(nameof(TelemetryAggregationWorker), ex1h.GetType().Name);
+                    _logger.LogError(ex1h, "Error occurred during 1h telemetry rollup aggregation.");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown
             }
             catch (Exception ex)
             {
+                isSuccess = false;
                 AggregationErrorsCounter.Add(1);
+                workerMetrics?.RecordWorkerError(nameof(TelemetryAggregationWorker), ex.GetType().Name);
                 _logger.LogError(ex, "Error occurred during telemetry aggregation cycle.");
+            }
+            finally
+            {
+                sw.Stop();
+                workerMetrics?.RecordWorkerRun(nameof(TelemetryAggregationWorker), sw.Elapsed.TotalSeconds, isSuccess);
+                workerMetrics?.RecordWorkerActiveState(nameof(TelemetryAggregationWorker), false);
             }
         }
 

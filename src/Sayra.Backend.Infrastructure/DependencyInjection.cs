@@ -56,6 +56,7 @@ namespace Sayra.Backend.Infrastructure
             services.AddSingleton<Sayra.Backend.Application.Resilience.IResilienceMetrics, Sayra.Backend.Infrastructure.Diagnostics.ResilienceMetrics>();
             services.AddSingleton<Sayra.Backend.Application.Resilience.IResiliencePipeline, Sayra.Backend.Infrastructure.Resilience.ResiliencePipeline>();
             services.AddSingleton<Sayra.Backend.Application.Abstractions.Transport.ITransportMetrics, Sayra.Backend.Infrastructure.Diagnostics.TransportMetrics>();
+            services.AddSingleton<Sayra.Backend.Application.Abstractions.Diagnostics.IWorkerMetrics, Sayra.Backend.Infrastructure.Diagnostics.WorkerMetrics>();
 
             // 2. Database Foundation Setup
             var offlineQueueOptions = configuration.GetSection(OfflineQueueOptions.SectionName).Get<OfflineQueueOptions>() ?? new OfflineQueueOptions();
