@@ -277,6 +277,7 @@ namespace Sayra.Backend.Infrastructure.Security
 
             try
             {
+                string pcId = connection.PcId ?? "UNKNOWN";
                 _ = Task.Run(async () =>
                 {
                     try
@@ -289,7 +290,7 @@ namespace Sayra.Backend.Infrastructure.Security
                                 eventType: "DEVICE_AUTHENTICATION_FAILED",
                                 actorId: null,
                                 actorType: "DEVICE",
-                                deviceId: connection.PcId ?? "UNKNOWN",
+                                deviceId: pcId,
                                 organizationId: null,
                                 siteId: null,
                                 resourceType: "Workstation",
@@ -300,15 +301,15 @@ namespace Sayra.Backend.Infrastructure.Security
                                 cancellationToken: CancellationToken.None);
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Non-blocking background event recording
+                        _logger.LogWarning(ex, "Background security event recording failed for connection {ConnectionId}.", connection.ConnectionId);
                     }
                 });
             }
-            catch
+            catch (Exception ex)
             {
-                // Non-blocking security event recording
+                _logger.LogWarning(ex, "Failed to dispatch background security event for connection {ConnectionId}.", connection.ConnectionId);
             }
 
             // Clean up transient session details on validation failure to prevent memory leak

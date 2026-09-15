@@ -7,8 +7,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using Sayra.Backend.Application.Abstractions.Caching;
 using Sayra.Backend.Application.Abstractions.Communication;
+using Sayra.Backend.Application.Abstractions.Diagnostics;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Domain;
@@ -60,9 +62,15 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public async Task PerformLivenessCheckAsync(CancellationToken cancellationToken)
         {
+            var sw = Stopwatch.StartNew();
+            bool isSuccess = true;
+            using var scope = _scopeFactory.CreateScope();
+            var metrics = scope.ServiceProvider.GetService<IWorkerMetrics>();
+
             try
             {
-                using var scope = _scopeFactory.CreateScope();
+                metrics?.RecordWorkerActiveState(nameof(LivenessMonitoringWorker), true);
+
                 var sessionRepo = scope.ServiceProvider.GetRequiredService<ICommunicationSessionRepository>();
                 var connectionRegistry = scope.ServiceProvider.GetRequiredService<ITcpConnectionRegistry>();
                 var tcpSessionManager = scope.ServiceProvider.GetRequiredService<ITcpSessionManager>();
@@ -76,128 +84,156 @@ namespace Sayra.Backend.Infrastructure.Transport
                 var degradedThreshold = TimeSpan.FromSeconds(_serverOptions.HeartbeatInterval + _serverOptions.HeartbeatGracePeriod);
                 var timeoutThreshold = TimeSpan.FromSeconds(_serverOptions.HeartbeatTimeout);
 
+                int processedCount = 0;
                 foreach (var session in activeSessions)
                 {
                     if (cancellationToken.IsCancellationRequested) break;
 
-                    var referenceTime = session.LastHeartbeatAt ?? session.LastActivityAt;
-                    var elapsed = now - referenceTime;
-
-                    if (elapsed >= timeoutThreshold)
+                    try
                     {
-                        _logger.LogWarning("HEARTBEAT_TIMEOUT: Connection {ConnectionId} (PcId: {PcId}) timed out after {Elapsed:F1}s of inactivity.",
-                            session.ConnectionId, session.PcId ?? "N/A", elapsed.TotalSeconds);
+                        var referenceTime = session.LastHeartbeatAt ?? session.LastActivityAt;
+                        var elapsed = now - referenceTime;
 
-                        session.Disconnect("Heartbeat Timeout", now);
-                        await sessionRepo.UpdateAsync(session, cancellationToken);
-
-                        // Disconnect TCP Connection
-                        await tcpSessionManager.HandleDisconnectAsync(session.ConnectionId, "Heartbeat Timeout", cancellationToken);
-
-                        // Reset sequence validator
-                        if (sequenceValidator != null)
+                        if (elapsed >= timeoutThreshold)
                         {
-                            sequenceValidator.ResetSession(session.ConnectionId);
-                        }
+                            _logger.LogWarning("HEARTBEAT_TIMEOUT: Connection {ConnectionId} (PcId: {PcId}) timed out after {Elapsed:F1}s of inactivity.",
+                                session.ConnectionId, session.PcId ?? "N/A", elapsed.TotalSeconds);
 
-                        // Remove Redis ephemeral state
-                        if (redisService != null && Guid.TryParse(session.ConnectionId, out var connGuid))
-                        {
-                            try
-                            {
-                                var redisKey = RedisKeyGenerator.ConnectionStateKey(connGuid);
-                                await redisService.RemoveAsync(redisKey);
-                            }
-                            catch (Exception rEx)
-                            {
-                                _logger.LogWarning(rEx, "Failed to remove Redis state during timeout for connection {ConnectionId}.", session.ConnectionId);
-                            }
-                        }
-
-                        // Workstation DB update with multi-connection safety
-                        if (!string.IsNullOrEmpty(session.PcId) && dbContext != null)
-                        {
-                            try
-                            {
-                                string pcIdUpper = session.PcId.Trim().ToUpperInvariant();
-                                var activeConnection = connectionRegistry.GetByPcId(pcIdUpper);
-
-                                // If active connection registry now has a DIFFERENT connection for this PcId, skip marking offline!
-                                if (activeConnection != null && !string.Equals(activeConnection.ConnectionId, session.ConnectionId, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    _logger.LogInformation("STALE_CLEANUP_SKIPPED: Disconnected connection {OldConnId} for PcId {PcId} is superseded by active connection {NewConnId}.",
-                                        session.ConnectionId, session.PcId, activeConnection.ConnectionId);
-                                }
-                                else
-                                {
-                                    var workstation = await dbContext.Workstations.FirstOrDefaultAsync(w => w.PcId == pcIdUpper, cancellationToken);
-                                    if (workstation != null && !string.Equals(workstation.Status, "OFFLINE", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        workstation.Status = "OFFLINE";
-                                        await dbContext.SaveChangesAsync(cancellationToken);
-                                        _logger.LogInformation("WORKSTATION_MARKED_OFFLINE: Workstation {PcId} marked Offline due to heartbeat timeout.", session.PcId);
-                                    }
-                                }
-                            }
-                            catch (Exception dbEx)
-                            {
-                                _logger.LogWarning(dbEx, "Failed to update Workstation offline status in DB for PcId {PcId}.", session.PcId);
-                            }
-                        }
-                    }
-                    else if (elapsed >= degradedThreshold)
-                    {
-                        _logger.LogInformation("WORKSTATION_MARKED_STALE: Connection {ConnectionId} (PcId: {PcId}) marked degraded/stale after {Elapsed:F1}s without heartbeat.",
-                            session.ConnectionId, session.PcId ?? "N/A", elapsed.TotalSeconds);
-
-                        if (session.State != ConnectionLifecycleState.Degraded)
-                        {
-                            session.MarkDegraded("Heartbeat Delay", now);
+                            session.Disconnect("Heartbeat Timeout", now);
                             await sessionRepo.UpdateAsync(session, cancellationToken);
-                        }
 
-                        var tcpConn = connectionRegistry.Get(session.ConnectionId);
-                        if (tcpConn != null && tcpConn.State != ConnectionLifecycleState.Degraded)
-                        {
-                            try
+                            // Disconnect TCP Connection
+                            await tcpSessionManager.HandleDisconnectAsync(session.ConnectionId, "Heartbeat Timeout", cancellationToken);
+
+                            // Reset sequence validator
+                            if (sequenceValidator != null)
                             {
-                                tcpConn.UpdateState(ConnectionLifecycleState.Degraded);
+                                sequenceValidator.ResetSession(session.ConnectionId);
                             }
-                            catch
-                            {
-                                // Ignore invalid transition if already disconnected
-                            }
-                        }
 
-                        if (!string.IsNullOrEmpty(session.PcId) && dbContext != null)
-                        {
-                            try
+                            // Remove Redis ephemeral state
+                            if (redisService != null && Guid.TryParse(session.ConnectionId, out var connGuid))
                             {
-                                string pcIdUpper = session.PcId.Trim().ToUpperInvariant();
-                                var activeConnection = connectionRegistry.GetByPcId(pcIdUpper);
-
-                                if (activeConnection == null || string.Equals(activeConnection.ConnectionId, session.ConnectionId, StringComparison.OrdinalIgnoreCase))
+                                try
                                 {
-                                    var workstation = await dbContext.Workstations.FirstOrDefaultAsync(w => w.PcId == pcIdUpper, cancellationToken);
-                                    if (workstation != null && string.Equals(workstation.Status, "ONLINE", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        workstation.Status = "STALE";
-                                        await dbContext.SaveChangesAsync(cancellationToken);
-                                        _logger.LogInformation("WORKSTATION_MARKED_STALE: Workstation {PcId} status updated to Stale in database.", session.PcId);
-                                    }
+                                    var redisKey = RedisKeyGenerator.ConnectionStateKey(connGuid);
+                                    await redisService.RemoveAsync(redisKey);
+                                }
+                                catch (Exception rEx)
+                                {
+                                    _logger.LogWarning(rEx, "Failed to remove Redis state during timeout for connection {ConnectionId}.", session.ConnectionId);
                                 }
                             }
-                            catch (Exception dbEx)
+
+                            // Workstation DB update with multi-connection safety
+                            if (!string.IsNullOrEmpty(session.PcId) && dbContext != null)
                             {
-                                _logger.LogWarning(dbEx, "Failed to update Workstation stale status in DB for PcId {PcId}.", session.PcId);
+                                try
+                                {
+                                    string pcIdUpper = session.PcId.Trim().ToUpperInvariant();
+                                    var activeConnection = connectionRegistry.GetByPcId(pcIdUpper);
+
+                                    // If active connection registry now has a DIFFERENT connection for this PcId, skip marking offline!
+                                    if (activeConnection != null && !string.Equals(activeConnection.ConnectionId, session.ConnectionId, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _logger.LogInformation("STALE_CLEANUP_SKIPPED: Disconnected connection {OldConnId} for PcId {PcId} is superseded by active connection {NewConnId}.",
+                                            session.ConnectionId, session.PcId, activeConnection.ConnectionId);
+                                    }
+                                    else
+                                    {
+                                        var workstation = await dbContext.Workstations.FirstOrDefaultAsync(w => w.PcId == pcIdUpper, cancellationToken);
+                                        if (workstation != null && !string.Equals(workstation.Status, "OFFLINE", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            workstation.Status = "OFFLINE";
+                                            await dbContext.SaveChangesAsync(cancellationToken);
+                                            _logger.LogInformation("WORKSTATION_MARKED_OFFLINE: Workstation {PcId} marked Offline due to heartbeat timeout.", session.PcId);
+                                        }
+                                    }
+                                }
+                                catch (Exception dbEx)
+                                {
+                                    _logger.LogWarning(dbEx, "Failed to update Workstation offline status in DB for PcId {PcId}.", session.PcId);
+                                }
                             }
                         }
+                        else if (elapsed >= degradedThreshold)
+                        {
+                            _logger.LogInformation("WORKSTATION_MARKED_STALE: Connection {ConnectionId} (PcId: {PcId}) marked degraded/stale after {Elapsed:F1}s without heartbeat.",
+                                session.ConnectionId, session.PcId ?? "N/A", elapsed.TotalSeconds);
+
+                            if (session.State != ConnectionLifecycleState.Degraded)
+                            {
+                                session.MarkDegraded("Heartbeat Delay", now);
+                                await sessionRepo.UpdateAsync(session, cancellationToken);
+                            }
+
+                            var tcpConn = connectionRegistry.Get(session.ConnectionId);
+                            if (tcpConn != null && tcpConn.State != ConnectionLifecycleState.Degraded)
+                            {
+                                try
+                                {
+                                    tcpConn.UpdateState(ConnectionLifecycleState.Degraded);
+                                }
+                                catch
+                                {
+                                    // Ignore invalid transition if already disconnected
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(session.PcId) && dbContext != null)
+                            {
+                                try
+                                {
+                                    string pcIdUpper = session.PcId.Trim().ToUpperInvariant();
+                                    var activeConnection = connectionRegistry.GetByPcId(pcIdUpper);
+
+                                    if (activeConnection == null || string.Equals(activeConnection.ConnectionId, session.ConnectionId, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var workstation = await dbContext.Workstations.FirstOrDefaultAsync(w => w.PcId == pcIdUpper, cancellationToken);
+                                        if (workstation != null && string.Equals(workstation.Status, "ONLINE", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            workstation.Status = "STALE";
+                                            await dbContext.SaveChangesAsync(cancellationToken);
+                                            _logger.LogInformation("WORKSTATION_MARKED_STALE: Workstation {PcId} status updated to Stale in database.", session.PcId);
+                                        }
+                                    }
+                                }
+                                catch (Exception dbEx)
+                                {
+                                    _logger.LogWarning(dbEx, "Failed to update Workstation stale status in DB for PcId {PcId}.", session.PcId);
+                                }
+                            }
+                        }
+                        processedCount++;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception sessionEx)
+                    {
+                        metrics?.RecordWorkerError(nameof(LivenessMonitoringWorker), sessionEx.GetType().Name);
+                        _logger.LogError(sessionEx, "Error evaluating liveness for connection {ConnectionId}.", session.ConnectionId);
                     }
                 }
+
+                metrics?.RecordItemsProcessed(nameof(LivenessMonitoringWorker), processedCount);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown cancellation
             }
             catch (Exception ex)
             {
+                isSuccess = false;
+                metrics?.RecordWorkerError(nameof(LivenessMonitoringWorker), ex.GetType().Name);
                 _logger.LogError(ex, "Error occurred during periodic liveness evaluation check.");
+            }
+            finally
+            {
+                sw.Stop();
+                metrics?.RecordWorkerRun(nameof(LivenessMonitoringWorker), sw.Elapsed.TotalSeconds, isSuccess);
+                metrics?.RecordWorkerActiveState(nameof(LivenessMonitoringWorker), false);
             }
         }
     }

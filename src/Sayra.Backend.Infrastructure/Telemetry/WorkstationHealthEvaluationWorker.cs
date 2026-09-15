@@ -76,76 +76,115 @@ namespace Sayra.Backend.Infrastructure.Telemetry
 
         public async Task PerformEvaluationCycleAsync(CancellationToken cancellationToken)
         {
+            var cycleSw = Stopwatch.StartNew();
+            bool isSuccess = true;
             using var scope = _scopeFactory.CreateScope();
             var stateReader = scope.ServiceProvider.GetRequiredService<IWorkstationStateReader>();
             var healthStore = scope.ServiceProvider.GetRequiredService<IWorkstationHealthStore>();
             var evaluator = scope.ServiceProvider.GetRequiredService<IWorkstationHealthEvaluator>();
             var alertEngine = scope.ServiceProvider.GetService<IAlertEvaluationEngine>();
             var metrics = scope.ServiceProvider.GetService<IWorkstationHealthMetrics>();
+            var workerMetrics = scope.ServiceProvider.GetService<Sayra.Backend.Application.Abstractions.Diagnostics.IWorkerMetrics>();
 
-            var sw = Stopwatch.StartNew();
-
-            // Fetch all currently tracked workstation states
-            var states = await stateReader.GetWorkstationStatesAsync(null, null, cancellationToken);
-            if (states == null || states.Count == 0)
+            try
             {
-                sw.Stop();
-                metrics?.RecordEvaluationRun(sw.Elapsed.TotalSeconds, 0, 0, 0, 0, 0, 0);
-                return;
-            }
+                workerMetrics?.RecordWorkerActiveState(nameof(WorkstationHealthEvaluationWorker), true);
 
-            int batchSize = _options.Value.EvaluationBatchSize <= 0 ? 100 : _options.Value.EvaluationBatchSize;
-            int healthy = 0, warning = 0, degraded = 0, critical = 0, offline = 0, unknown = 0;
-
-            for (int i = 0; i < states.Count; i += batchSize)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var batch = states.Skip(i).Take(batchSize).ToList();
-
-                foreach (var state in batch)
+                // Fetch all currently tracked workstation states
+                var states = await stateReader.GetWorkstationStatesAsync(null, null, cancellationToken);
+                if (states == null || states.Count == 0)
                 {
-                    if (string.IsNullOrWhiteSpace(state.PcId)) continue;
+                    cycleSw.Stop();
+                    metrics?.RecordEvaluationRun(cycleSw.Elapsed.TotalSeconds, 0, 0, 0, 0, 0, 0);
+                    workerMetrics?.RecordWorkerRun(nameof(WorkstationHealthEvaluationWorker), cycleSw.Elapsed.TotalSeconds, true);
+                    return;
+                }
 
-                    var previousHealth = await healthStore.GetHealthResultAsync(state.PcId, cancellationToken);
-                    var newHealth = await evaluator.EvaluateWorkstationHealthAsync(state, previousHealth, _options.Value, cancellationToken);
+                int batchSize = _options.Value.EvaluationBatchSize <= 0 ? 100 : _options.Value.EvaluationBatchSize;
+                int healthy = 0, warning = 0, degraded = 0, critical = 0, offline = 0, unknown = 0;
+                int processedCount = 0;
 
-                    if (previousHealth != null && previousHealth.HealthState != newHealth.HealthState)
+                for (int i = 0; i < states.Count; i += batchSize)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var batch = states.Skip(i).Take(batchSize).ToList();
+
+                    foreach (var state in batch)
                     {
-                        metrics?.RecordHealthStateTransition(previousHealth.HealthState.ToString(), newHealth.HealthState.ToString());
-                        _logger.LogInformation("Workstation {PcId} health state transitioned from {OldState} to {NewState} (Score: {Score:F0}).",
-                            state.PcId, previousHealth.HealthState, newHealth.HealthState, newHealth.HealthScore);
-                    }
+                        if (string.IsNullOrWhiteSpace(state.PcId)) continue;
 
-                    await healthStore.SaveHealthResultAsync(newHealth, cancellationToken);
-
-                    if (alertEngine != null)
-                    {
                         try
                         {
-                            await alertEngine.EvaluateHealthResultAsync(newHealth, cancellationToken);
-                        }
-                        catch (Exception alertEx) when (alertEx is not OperationCanceledException)
-                        {
-                            _logger.LogWarning(alertEx, "Failed alert evaluation for workstation {PcId}.", state.PcId);
-                        }
-                    }
+                            var previousHealth = await healthStore.GetHealthResultAsync(state.PcId, cancellationToken);
+                            var newHealth = await evaluator.EvaluateWorkstationHealthAsync(state, previousHealth, _options.Value, cancellationToken);
 
-                    switch (newHealth.HealthState)
-                    {
-                        case Domain.Enums.WorkstationHealthState.Healthy: healthy++; break;
-                        case Domain.Enums.WorkstationHealthState.Warning: warning++; break;
-                        case Domain.Enums.WorkstationHealthState.Degraded: degraded++; break;
-                        case Domain.Enums.WorkstationHealthState.Critical: critical++; break;
-                        case Domain.Enums.WorkstationHealthState.Offline: offline++; break;
-                        default: unknown++; break;
+                            if (previousHealth != null && previousHealth.HealthState != newHealth.HealthState)
+                            {
+                                metrics?.RecordHealthStateTransition(previousHealth.HealthState.ToString(), newHealth.HealthState.ToString());
+                                _logger.LogInformation("Workstation {PcId} health state transitioned from {OldState} to {NewState} (Score: {Score:F0}).",
+                                    state.PcId, previousHealth.HealthState, newHealth.HealthState, newHealth.HealthScore);
+                            }
+
+                            await healthStore.SaveHealthResultAsync(newHealth, cancellationToken);
+
+                            if (alertEngine != null)
+                            {
+                                try
+                                {
+                                    await alertEngine.EvaluateHealthResultAsync(newHealth, cancellationToken);
+                                }
+                                catch (Exception alertEx) when (alertEx is not OperationCanceledException)
+                                {
+                                    _logger.LogWarning(alertEx, "Failed alert evaluation for workstation {PcId}.", state.PcId);
+                                }
+                            }
+
+                            switch (newHealth.HealthState)
+                            {
+                                case Domain.Enums.WorkstationHealthState.Healthy: healthy++; break;
+                                case Domain.Enums.WorkstationHealthState.Warning: warning++; break;
+                                case Domain.Enums.WorkstationHealthState.Degraded: degraded++; break;
+                                case Domain.Enums.WorkstationHealthState.Critical: critical++; break;
+                                case Domain.Enums.WorkstationHealthState.Offline: offline++; break;
+                                default: unknown++; break;
+                            }
+
+                            processedCount++;
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                        catch (Exception itemEx)
+                        {
+                            workerMetrics?.RecordWorkerError(nameof(WorkstationHealthEvaluationWorker), itemEx.GetType().Name);
+                            _logger.LogError(itemEx, "Failed workstation health evaluation for {PcId}.", state.PcId);
+                        }
                     }
                 }
-            }
 
-            sw.Stop();
-            metrics?.RecordEvaluationRun(sw.Elapsed.TotalSeconds, states.Count, healthy, warning, degraded, critical, offline);
-            _logger.LogDebug("Completed workstation health evaluation cycle for {Count} workstations in {DurationMs}ms.",
-                states.Count, sw.ElapsedMilliseconds);
+                cycleSw.Stop();
+                metrics?.RecordEvaluationRun(cycleSw.Elapsed.TotalSeconds, states.Count, healthy, warning, degraded, critical, offline);
+                workerMetrics?.RecordItemsProcessed(nameof(WorkstationHealthEvaluationWorker), processedCount);
+                _logger.LogDebug("Completed workstation health evaluation cycle for {Count} workstations in {DurationMs}ms.",
+                    states.Count, cycleSw.ElapsedMilliseconds);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown cancellation
+            }
+            catch (Exception ex)
+            {
+                isSuccess = false;
+                workerMetrics?.RecordWorkerError(nameof(WorkstationHealthEvaluationWorker), ex.GetType().Name);
+                _logger.LogError(ex, "Error occurred during workstation health evaluation cycle.");
+            }
+            finally
+            {
+                cycleSw.Stop();
+                workerMetrics?.RecordWorkerRun(nameof(WorkstationHealthEvaluationWorker), cycleSw.Elapsed.TotalSeconds, isSuccess);
+                workerMetrics?.RecordWorkerActiveState(nameof(WorkstationHealthEvaluationWorker), false);
+            }
         }
     }
 }

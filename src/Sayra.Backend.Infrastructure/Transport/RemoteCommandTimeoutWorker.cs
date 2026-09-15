@@ -1,20 +1,23 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sayra.Backend.Application.Abstractions.Communication;
+using Sayra.Backend.Application.Abstractions.Diagnostics;
 
 namespace Sayra.Backend.Infrastructure.Transport
 {
     public class RemoteCommandTimeoutWorker : BackgroundService
     {
-        private readonly Microsoft.Extensions.DependencyInjection.IServiceScopeFactory _scopeFactory;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<RemoteCommandTimeoutWorker> _logger;
         private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(15);
 
         public RemoteCommandTimeoutWorker(
-            Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopeFactory,
+            IServiceScopeFactory scopeFactory,
             ILogger<RemoteCommandTimeoutWorker> logger)
         {
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -33,9 +36,7 @@ namespace Sayra.Backend.Infrastructure.Transport
                 {
                     if (await timer.WaitForNextTickAsync(stoppingToken))
                     {
-                        using var scope = _scopeFactory.CreateScope();
-                        var remoteCommandManager = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IRemoteCommandManager>(scope.ServiceProvider);
-                        await remoteCommandManager.EvaluateTimeoutsAsync(stoppingToken);
+                        await PerformTimeoutEvaluationCycleAsync(stoppingToken);
                     }
                 }
                 catch (OperationCanceledException)
@@ -49,6 +50,37 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
 
             _logger.LogInformation("RemoteCommandTimeoutWorker background service stopped.");
+        }
+
+        public async Task PerformTimeoutEvaluationCycleAsync(CancellationToken cancellationToken)
+        {
+            var sw = Stopwatch.StartNew();
+            bool isSuccess = true;
+            using var scope = _scopeFactory.CreateScope();
+            var metrics = scope.ServiceProvider.GetService<IWorkerMetrics>();
+
+            try
+            {
+                metrics?.RecordWorkerActiveState(nameof(RemoteCommandTimeoutWorker), true);
+                var remoteCommandManager = scope.ServiceProvider.GetRequiredService<IRemoteCommandManager>();
+                await remoteCommandManager.EvaluateTimeoutsAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Graceful cancellation on shutdown
+            }
+            catch (Exception ex)
+            {
+                isSuccess = false;
+                metrics?.RecordWorkerError(nameof(RemoteCommandTimeoutWorker), ex.GetType().Name);
+                _logger.LogError(ex, "Error occurred during RemoteCommand timeout evaluation cycle.");
+            }
+            finally
+            {
+                sw.Stop();
+                metrics?.RecordWorkerRun(nameof(RemoteCommandTimeoutWorker), sw.Elapsed.TotalSeconds, isSuccess);
+                metrics?.RecordWorkerActiveState(nameof(RemoteCommandTimeoutWorker), false);
+            }
         }
     }
 }

@@ -216,7 +216,17 @@ namespace Sayra.Backend.Infrastructure.Transport
 
                     _logger.LogInformation("New TCP client connection request accepted from {RemoteEndPoint}.", tcpClient.Client?.RemoteEndPoint);
 
-                    _ = Task.Run(() => HandleClientAsync(tcpClient, remoteIp, cancellationToken), cancellationToken);
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleClientAsync(tcpClient, remoteIp, cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Unhandled exception in background client handler for IP {RemoteIp}.", remoteIp);
+                        }
+                    }, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
