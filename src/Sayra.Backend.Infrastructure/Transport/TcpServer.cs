@@ -40,6 +40,9 @@ namespace Sayra.Backend.Infrastructure.Transport
         private readonly ServerOptions _serverOptions;
         private readonly TlsOptions _tlsOptions;
         private readonly ILogger<TcpServer> _logger;
+        private readonly ITransportMetrics? _transportMetrics;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _ipConnectionCounts = new();
+        private int _unauthenticatedCount;
         private TcpListener? _listener;
         private CancellationTokenSource? _cts;
         private Task? _listenerTask;
@@ -69,7 +72,8 @@ namespace Sayra.Backend.Infrastructure.Transport
             IOptions<TlsOptions> tlsOptions,
             ILogger<TcpServer> logger,
             IServiceScopeFactory? serviceScopeFactory = null,
-            ITcpSessionManager? sessionManager = null)
+            ITcpSessionManager? sessionManager = null,
+            ITransportMetrics? transportMetrics = null)
         {
             _connectionRegistry = connectionRegistry ?? throw new ArgumentNullException(nameof(connectionRegistry));
             _tcpAuthenticationService = tcpAuthenticationService ?? throw new ArgumentNullException(nameof(tcpAuthenticationService));
@@ -80,6 +84,7 @@ namespace Sayra.Backend.Infrastructure.Transport
             _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
             _tlsOptions = tlsOptions?.Value ?? throw new ArgumentNullException(nameof(tlsOptions));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _transportMetrics = transportMetrics;
             _sessionManager = sessionManager ?? new TcpSessionManager(_connectionRegistry, _redisService, NullLogger<TcpSessionManager>.Instance);
         }
 
@@ -161,11 +166,34 @@ namespace Sayra.Backend.Infrastructure.Transport
                 try
                 {
                     var tcpClient = await _listener!.AcceptTcpClientAsync(cancellationToken);
+                    string remoteIp = tcpClient.Client?.RemoteEndPoint is IPEndPoint ep ? ep.Address.ToString() : "Unknown";
 
                     if (_connectionRegistry.Count >= _serverOptions.MaximumConnections)
                     {
+                        _transportMetrics?.RecordConnectionRejected("MaxConnectionsExceeded");
                         _logger.LogWarning("Maximum simultaneous connection limit reached ({Limit}). Rejecting connection from {RemoteEndPoint}.",
-                            _serverOptions.MaximumConnections, tcpClient.Client.RemoteEndPoint);
+                            _serverOptions.MaximumConnections, tcpClient.Client?.RemoteEndPoint);
+                        tcpClient.Close();
+                        tcpClient.Dispose();
+                        continue;
+                    }
+
+                    int currentIpCount = _ipConnectionCounts.TryGetValue(remoteIp, out var cCount) ? cCount : 0;
+                    if (currentIpCount >= _serverOptions.MaxConnectionsPerIp)
+                    {
+                        _transportMetrics?.RecordConnectionRejected("MaxConnectionsPerIpExceeded");
+                        _logger.LogWarning("Per-IP connection limit reached ({Limit}) for IP {RemoteIp}. Rejecting connection.",
+                            _serverOptions.MaxConnectionsPerIp, remoteIp);
+                        tcpClient.Close();
+                        tcpClient.Dispose();
+                        continue;
+                    }
+
+                    if (_unauthenticatedCount >= _serverOptions.MaxUnauthenticatedConnections)
+                    {
+                        _transportMetrics?.RecordConnectionRejected("MaxUnauthenticatedConnectionsExceeded");
+                        _logger.LogWarning("Maximum unauthenticated connection limit reached ({Limit}). Rejecting connection from {RemoteEndPoint}.",
+                            _serverOptions.MaxUnauthenticatedConnections, tcpClient.Client?.RemoteEndPoint);
                         tcpClient.Close();
                         tcpClient.Dispose();
                         continue;
@@ -180,9 +208,15 @@ namespace Sayra.Backend.Infrastructure.Transport
                         tcpClient.SendBufferSize = _serverOptions.SendBufferSize;
                     }
 
-                    _logger.LogInformation("New TCP client connection request accepted from {RemoteEndPoint}.", tcpClient.Client.RemoteEndPoint);
+                    _ipConnectionCounts.AddOrUpdate(remoteIp, 1, (_, count) => count + 1);
+                    Interlocked.Increment(ref _unauthenticatedCount);
 
-                    _ = Task.Run(() => HandleClientAsync(tcpClient, cancellationToken), cancellationToken);
+                    _transportMetrics?.RecordConnectionAccepted();
+                    _transportMetrics?.RecordConnectionActiveDelta(1);
+
+                    _logger.LogInformation("New TCP client connection request accepted from {RemoteEndPoint}.", tcpClient.Client?.RemoteEndPoint);
+
+                    _ = Task.Run(() => HandleClientAsync(tcpClient, remoteIp, cancellationToken), cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -199,15 +233,23 @@ namespace Sayra.Backend.Infrastructure.Transport
             }
         }
 
-        private async Task HandleClientAsync(TcpClient tcpClient, CancellationToken cancellationToken)
+        private async Task HandleClientAsync(TcpClient tcpClient, string remoteIp, CancellationToken cancellationToken)
         {
             var connectionId = Guid.NewGuid().ToString();
             ITcpConnection? connection = null;
             string disconnectReason = "Normal Closure";
+            bool isAuthenticated = false;
 
             try
             {
-                string remoteIp = tcpClient.Client?.RemoteEndPoint is IPEndPoint ep ? ep.Address.ToString() : "Unknown";
+                if (_serverOptions.SendTimeoutSeconds > 0)
+                {
+                    tcpClient.SendTimeout = _serverOptions.SendTimeoutSeconds * 1000;
+                }
+                if (_serverOptions.ReadTimeoutSeconds > 0)
+                {
+                    tcpClient.ReceiveTimeout = _serverOptions.ReadTimeoutSeconds * 1000;
+                }
 
                 if (_serviceScopeFactory != null)
                 {
@@ -263,6 +305,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                     _logger.LogWarning("TCP connection {ConnectionId} failed secure handshake. Closing immediately.", connectionId);
                     return;
                 }
+
+                isAuthenticated = true;
+                Interlocked.Decrement(ref _unauthenticatedCount);
 
                 if (!string.IsNullOrEmpty(connection.PcId) && _serviceScopeFactory != null)
                 {
@@ -322,9 +367,16 @@ namespace Sayra.Backend.Infrastructure.Transport
                     }
                 }
             }
+            catch (TimeoutException tex)
+            {
+                disconnectReason = $"Timeout: {tex.Message}";
+                _transportMetrics?.RecordSlowDisconnect("WriteOrReadTimeout");
+                _logger.LogWarning(tex, "Timeout on connection {ConnectionId}. Terminating connection.", connectionId);
+            }
             catch (OperationCanceledException)
             {
                 disconnectReason = "Operation Canceled / Timeout / Shutdown";
+                _transportMetrics?.RecordSlowDisconnect("CanceledOrTimeout");
                 _logger.LogInformation("Operation canceled or handshake timed out for connection {ConnectionId}.", connectionId);
             }
             catch (Exception ex)
@@ -378,6 +430,18 @@ namespace Sayra.Backend.Infrastructure.Transport
                     tcpClient.Dispose();
                 }
 
+                _transportMetrics?.RecordConnectionActiveDelta(-1);
+
+                if (!string.IsNullOrEmpty(remoteIp) && remoteIp != "Unknown")
+                {
+                    _ipConnectionCounts.AddOrUpdate(remoteIp, 0, (_, count) => Math.Max(0, count - 1));
+                }
+
+                if (!isAuthenticated)
+                {
+                    Interlocked.Decrement(ref _unauthenticatedCount);
+                }
+
                 _logger.LogInformation("TCP connection {ConnectionId} cleaned up and resources released. Active count: {Count}.", connectionId, _connectionRegistry.Count);
             }
         }
@@ -422,6 +486,10 @@ namespace Sayra.Backend.Infrastructure.Transport
             var validationResult = await _secureMessageService.HandleSecureMessageAsync(session, appEnvelope);
             if (!validationResult.IsSuccess)
             {
+                if (validationResult.ErrorCode == "PAYLOAD_LIMIT_EXCEEDED")
+                {
+                    _transportMetrics?.RecordOversizedFrame(appEnvelope.Payload?.Length ?? 0, _serverOptions.MaximumMessageSize);
+                }
                 throw new InvalidOperationException(validationResult.ErrorMessage ?? "Validation failed.");
             }
 
