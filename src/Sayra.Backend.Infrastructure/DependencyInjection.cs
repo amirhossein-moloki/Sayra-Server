@@ -77,6 +77,7 @@ namespace Sayra.Backend.Infrastructure
 
             services.AddSingleton<IOfflineMetrics, OfflineMetrics>();
             services.AddScoped<IDurableOfflineQueue, SqliteDurableOfflineQueue>();
+            services.AddScoped<Sayra.Backend.Application.Abstractions.Backup.IBackupAndDisasterRecoveryService, Sayra.Backend.Infrastructure.Backup.BackupAndDisasterRecoveryService>();
             services.AddScoped<IOfflineSyncWorker, OfflineSyncWorker>();
             services.AddScoped<IDeadLetterEventRepository, DeadLetterEventRepository>();
             services.AddScoped<IOfflineDlqService, OfflineDlqService>();
