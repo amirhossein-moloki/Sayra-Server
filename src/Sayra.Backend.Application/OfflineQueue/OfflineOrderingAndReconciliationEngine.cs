@@ -636,14 +636,11 @@ namespace Sayra.Backend.Application.OfflineQueue
 
         private static string ComputeSha256(byte[] data)
         {
-            using var sha256 = SHA256.Create();
-            byte[] hashBytes = sha256.ComputeHash(data);
-            var sb = new StringBuilder(hashBytes.Length * 2);
-            foreach (byte b in hashBytes)
-            {
-                sb.Append(b.ToString("x2"));
-            }
-            return sb.ToString();
+            // Performance Optimization: Use static SHA256.HashData and Convert.ToHexString.
+            // Eliminates SHA256 instance allocation, StringBuilder allocation, and 32 string allocations per byte.ToString("x2").
+            // Convert.ToHexString is SIMD-accelerated in .NET 8.
+            byte[] hashBytes = SHA256.HashData(data);
+            return Convert.ToHexString(hashBytes).ToLowerInvariant();
         }
 
         private static string? ExtractStringProperty(string json, string propertyName)
