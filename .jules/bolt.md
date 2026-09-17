@@ -1,0 +1,3 @@
+## 2026-09-17 - .NET 8 SHA-256 and Hex Encoding Optimization
+**Learning:** Legacy `SHA256.Create()`, `StringBuilder`, and per-byte `b.ToString("x2")` loops allocate extra objects on the heap (including 32 string instances per hash). In .NET 8, static `SHA256.HashData(data)` combined with `Convert.ToHexString(hashBytes).ToLowerInvariant()` is allocation-efficient and leverages SIMD-accelerated hex formatting. Note that `Convert.ToHexStringLower` is a .NET 9+ API and not available in .NET 8.
+**Action:** When computing cryptographic hashes or formatting hex strings in .NET 8 codebases, use static `SHA256.HashData` and `Convert.ToHexString(...)`. Avoid `StringBuilder` loops or `b.ToString("x2")` byte iterations.
