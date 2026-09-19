@@ -16,6 +16,7 @@ using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Transport;
@@ -122,10 +123,8 @@ namespace Sayra.Backend.Infrastructure.Security
                 AuthResponseDto? responseDto;
                 try
                 {
-                    responseDto = JsonSerializer.Deserialize<AuthResponseDto>(responseLine, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                    // Re-use static ProtocolSerialization.Options to prevent per-call JsonSerializerOptions reflection/allocations
+                    responseDto = JsonSerializer.Deserialize<AuthResponseDto>(responseLine, ProtocolSerialization.Options);
                 }
                 catch (JsonException ex)
                 {
