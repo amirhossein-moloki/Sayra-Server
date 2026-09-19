@@ -38,6 +38,7 @@ Welcome to the **SAYRA Central Backend** documentation knowledge base. This docu
 * **[Phase 10 Stage 10-02 Application Resilience Report](operations/phase10-stage10-02-application-resilience-report.md)**: Implementation evidence, Stage 10-01 baseline reconciliation matrix, dependency resilience matrix, retry storm audit, and Stage 10-03 readiness determination.
 * **[Phase 10 Stage 10-03 Database Reliability Report](operations/phase10-stage10-03-database-reliability-report.md)**: Hardening report covering PostgreSQL connection pooling, DbContext lifetimes, query bounds, transaction boundaries, optimistic concurrency tokens, database constraints, migration safety, and stage gate sign-off.
 * **[Phase 10 Stage 10-09 Chaos & Failure Recovery Report](operations/phase10-stage10-09-chaos-and-failure-recovery-report.md)**: Controlled failure injection and recovery validation report covering PostgreSQL, Redis, TCP transport, background workers, process termination, offline queue reconciliation, resource pressure, identity anti-spoofing, and stage gate sign-off.
+* **[Phase 10 Final Production Hardening & Certification Report](operations/phase10-stage10-10-final-hardening-report.md)**: Capstone production hardening baseline, consolidated failure recovery matrix, capacity envelope, resource budget, SLO validation, operational runbooks, and Phase 10 completion sign-off.
 
 ### 7. 📜 [Architectural Decision Records (ADRs)](decisions/index.md)
 * **[ADR Index](decisions/index.md)**: Record of 12 foundational engineering decisions:
