@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "U7QEdsCTUMs=",
+  "dgSpecHash": "UnnhdMNBtaI=",
   "success": true,
   "projectFilePath": "/app/src/Sayra.Backend.Infrastructure/Sayra.Backend.Infrastructure.csproj",
   "expectedPackageFiles": [
@@ -50,8 +50,7 @@
     "/home/jules/.nuget/packages/stackexchange.redis/2.8.58/stackexchange.redis.2.8.58.nupkg.sha512",
     "/home/jules/.nuget/packages/system.io.pipelines/5.0.1/system.io.pipelines.5.0.1.nupkg.sha512",
     "/home/jules/.nuget/packages/system.memory/4.5.4/system.memory.4.5.4.nupkg.sha512",
-    "/home/jules/.nuget/packages/system.text.encodings.web/8.0.0/system.text.encodings.web.8.0.0.nupkg.sha512",
-    "/home/jules/.nuget/packages/system.text.json/8.0.4/system.text.json.8.0.4.nupkg.sha512"
+    "/home/jules/.nuget/packages/system.text.json/8.0.5/system.text.json.8.0.5.nupkg.sha512"
   ],
   "logs": []
 }
