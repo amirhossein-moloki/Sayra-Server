@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Sayra.Backend.Api.Security;
 using Sayra.Backend.Application.Abstractions.Messaging;
 using Sayra.Backend.Application.Financial;
+using Sayra.Backend.Application.Security;
 using Sayra.Backend.Contracts;
 
 namespace Sayra.Backend.Api.Controllers
@@ -31,6 +33,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{gamerId:guid}/balance")]
+        [HasPermission(PermissionCatalog.ViewFinancialData)]
         public async Task<IActionResult> GetBalanceAsync(Guid gamerId, CancellationToken cancellationToken)
         {
             var query = new GetAccountBalanceQuery { GamerEntityId = gamerId };
@@ -50,6 +53,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpGet("{gamerId:guid}/ledger")]
+        [HasPermission(PermissionCatalog.ViewLedger)]
         public async Task<IActionResult> GetLedgerAsync(Guid gamerId, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken cancellationToken = default)
         {
             var query = new GetAccountLedgerQuery
@@ -75,6 +79,7 @@ namespace Sayra.Backend.Api.Controllers
         }
 
         [HttpPost("{gamerId:guid}/deposit")]
+        [HasPermission(PermissionCatalog.ProcessPayment)]
         public async Task<IActionResult> DepositAsync(Guid gamerId, [FromBody] CreditAccountRequestDto request, CancellationToken cancellationToken = default)
         {
             if (request == null)
