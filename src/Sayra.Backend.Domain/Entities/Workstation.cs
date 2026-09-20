@@ -28,6 +28,9 @@ namespace Sayra.Backend.Domain
         // Optimistic concurrency token
         public uint RowVersion { get; set; }
 
+        // Performance optimization: Compile and reuse MacRegex static instance to avoid per-call Regex parsing and heap allocations on validation
+        private static readonly Regex MacRegex = new(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", RegexOptions.Compiled);
+
         public void TransitionTo(string newStatus)
         {
             var target = (newStatus ?? string.Empty).Trim().ToUpperInvariant();
@@ -114,8 +117,7 @@ namespace Sayra.Backend.Domain
             }
             MacAddress = MacAddress.Trim().ToUpperInvariant().Replace("-", ":");
             // Standard MAC validation regex: 6 octets separated by colons
-            var macRegex = new Regex(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$");
-            if (!macRegex.IsMatch(MacAddress))
+            if (!MacRegex.IsMatch(MacAddress))
             {
                 throw new InvalidDomainException("INVALID_MAC_ADDRESS", "MAC Address format is invalid.");
             }
