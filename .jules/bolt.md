@@ -1,0 +1,3 @@
+## 2026-09-08 - Workstation MAC Address Regex Optimization
+**Learning:** In domain entities like `Workstation`, instantiating `new Regex(...)` inside validation methods like `NormalizeAndValidate()` creates heap allocations and regex parsing overhead on every entity validation call. Compiling and caching the regex in a `private static readonly Regex` field with `RegexOptions.Compiled` eliminates per-call allocations while maintaining thread safety.
+**Action:** Always check domain entity and DTO validation methods for per-call `new Regex(...)` instantiations and extract them to static compiled fields.
