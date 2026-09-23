@@ -77,6 +77,9 @@ namespace Sayra.Backend.Domain
             UpdatedAt = DateTime.UtcNow;
         }
 
+        // Static compiled Regex to avoid repeated Regex object allocation and parsing during workstation validation
+        private static readonly Regex MacRegex = new Regex(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", RegexOptions.Compiled);
+
         public void NormalizeAndValidate()
         {
             // Normalize PC ID
@@ -113,9 +116,8 @@ namespace Sayra.Backend.Domain
                 throw new InvalidDomainException("INVALID_MAC_ADDRESS", "MAC Address is required.");
             }
             MacAddress = MacAddress.Trim().ToUpperInvariant().Replace("-", ":");
-            // Standard MAC validation regex: 6 octets separated by colons
-            var macRegex = new Regex(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$");
-            if (!macRegex.IsMatch(MacAddress))
+            // Standard MAC validation regex: 6 octets separated by colons (uses compiled static Regex to eliminate heap allocations)
+            if (!MacRegex.IsMatch(MacAddress))
             {
                 throw new InvalidDomainException("INVALID_MAC_ADDRESS", "MAC Address format is invalid.");
             }
