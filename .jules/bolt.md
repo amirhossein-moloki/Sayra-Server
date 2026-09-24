@@ -1,0 +1,3 @@
+## 2026-09-10 - Zero-Allocation TCP Frame Parsing with Memory Spans
+**Learning:** `TcpFrameParser` handles every single incoming TCP message frame on the server. Decoding frame strings from `ReadOnlySpan<byte>` via `CollectionsMarshal.AsSpan` eliminates heap array allocations (`byte[] frameBytes`) per frame, SIMD-accelerated `Span.IndexOf` speeds up newline scanning, `_buffer.AddRange(dataSpan)` vectorized block copying replaces byte-by-byte loops, and O(1) buffer clearing prevents array element shifts when fully consumed.
+**Action:** Always prefer `ReadOnlySpan<byte>` and `CollectionsMarshal.AsSpan` over temporary `byte[]` allocations and byte-by-byte loops for transport-level frame accumulators.
