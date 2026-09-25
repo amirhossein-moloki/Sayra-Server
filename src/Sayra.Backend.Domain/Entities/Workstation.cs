@@ -25,6 +25,8 @@ namespace Sayra.Backend.Domain
         public bool IsProvisioned { get; set; }
         public DateTime? ProvisionedAt { get; set; }
 
+        private static readonly Regex MacRegex = new(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", RegexOptions.Compiled);
+
         // Optimistic concurrency token
         public uint RowVersion { get; set; }
 
@@ -114,8 +116,7 @@ namespace Sayra.Backend.Domain
             }
             MacAddress = MacAddress.Trim().ToUpperInvariant().Replace("-", ":");
             // Standard MAC validation regex: 6 octets separated by colons
-            var macRegex = new Regex(@"^([0-9A-F]{2}:){5}[0-9A-F]{2}$");
-            if (!macRegex.IsMatch(MacAddress))
+            if (!MacRegex.IsMatch(MacAddress))
             {
                 throw new InvalidDomainException("INVALID_MAC_ADDRESS", "MAC Address format is invalid.");
             }
