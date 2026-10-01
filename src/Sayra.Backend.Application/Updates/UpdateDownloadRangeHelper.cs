@@ -8,6 +8,11 @@ namespace Sayra.Backend.Application.Updates
     {
         private const string BytesUnitPrefix = "bytes=";
 
+        /// <summary>
+        /// Parses HTTP Range headers according to RFC 7233 byte-range specifications.
+        /// Performance Optimization: Uses ReadOnlySpan&lt;char&gt; memory slicing and span-based long parsing
+        /// to eliminate string allocations during range header parsing and chunk resume validation.
+        /// </summary>
         public static UpdateDownloadRange ParseRangeHeader(string? rangeHeader, long totalSize)
         {
             if (totalSize < 0)
@@ -21,15 +26,16 @@ namespace Sayra.Backend.Application.Updates
                 return CreateFullRange(totalSize);
             }
 
-            var trimmedHeader = rangeHeader.Trim();
-            if (!trimmedHeader.StartsWith(BytesUnitPrefix, StringComparison.OrdinalIgnoreCase))
+            // Zero-allocation ReadOnlySpan<char> slicing for header parsing
+            ReadOnlySpan<char> headerSpan = rangeHeader.AsSpan().Trim();
+            if (!headerSpan.StartsWith(BytesUnitPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 // Unrecognized range unit or malformed header -> fallback to full range
                 return CreateFullRange(totalSize);
             }
 
-            var specifier = trimmedHeader.Substring(BytesUnitPrefix.Length).Trim();
-            if (string.IsNullOrWhiteSpace(specifier))
+            ReadOnlySpan<char> specifier = headerSpan.Slice(BytesUnitPrefix.Length).Trim();
+            if (specifier.IsEmpty)
             {
                 return CreateUnsatisfiableRange(totalSize);
             }
@@ -38,7 +44,7 @@ namespace Sayra.Backend.Application.Updates
             int commaIndex = specifier.IndexOf(',');
             if (commaIndex >= 0)
             {
-                specifier = specifier.Substring(0, commaIndex).Trim();
+                specifier = specifier.Slice(0, commaIndex).Trim();
             }
 
             int dashIndex = specifier.IndexOf('-');
@@ -47,8 +53,8 @@ namespace Sayra.Backend.Application.Updates
                 return CreateUnsatisfiableRange(totalSize);
             }
 
-            string startPart = specifier.Substring(0, dashIndex).Trim();
-            string endPart = specifier.Substring(dashIndex + 1).Trim();
+            ReadOnlySpan<char> startPart = specifier.Slice(0, dashIndex).Trim();
+            ReadOnlySpan<char> endPart = specifier.Slice(dashIndex + 1).Trim();
 
             if (totalSize == 0)
             {
@@ -56,9 +62,9 @@ namespace Sayra.Backend.Application.Updates
             }
 
             // Case A: Suffix Range "bytes=-N" (last N bytes)
-            if (string.IsNullOrEmpty(startPart))
+            if (startPart.IsEmpty)
             {
-                if (!long.TryParse(endPart, out long suffixLength) || suffixLength <= 0)
+                if (!long.TryParse(endPart, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long suffixLength) || suffixLength <= 0)
                 {
                     return CreateUnsatisfiableRange(totalSize);
                 }
@@ -73,7 +79,7 @@ namespace Sayra.Backend.Application.Updates
             }
 
             // Case B: Open-Ended Range "bytes=N-" (from N to EOF)
-            if (!long.TryParse(startPart, out long parsedStart) || parsedStart < 0)
+            if (!long.TryParse(startPart, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long parsedStart) || parsedStart < 0)
             {
                 return CreateUnsatisfiableRange(totalSize);
             }
@@ -83,13 +89,13 @@ namespace Sayra.Backend.Application.Updates
                 return CreateUnsatisfiableRange(totalSize);
             }
 
-            if (string.IsNullOrEmpty(endPart))
+            if (endPart.IsEmpty)
             {
                 return CreateValidRange(parsedStart, totalSize - 1, totalSize, isRangeRequest: true);
             }
 
             // Case C: Explicit Range "bytes=N-M"
-            if (!long.TryParse(endPart, out long parsedEnd) || parsedEnd < 0)
+            if (!long.TryParse(endPart, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long parsedEnd) || parsedEnd < 0)
             {
                 return CreateUnsatisfiableRange(totalSize);
             }
