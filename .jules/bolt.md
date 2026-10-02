@@ -1,0 +1,5 @@
+## 2026-03-29 - Zero-Allocation TCP Frame Extraction with ReadOnlySpan & CollectionsMarshal
+
+**Learning:** In TCP network buffer parsing, `List<byte>` is often used as a dynamic byte accumulator. Traditional byte-by-byte iteration, `List.IndexOf`, `List.CopyTo`, and `Encoding.UTF8.GetString(byte[])` allocate intermediate heap arrays and execute linear byte scans. By wrapping `List<byte>` with `CollectionsMarshal.AsSpan(_buffer)` in .NET 8, `ReadOnlySpan<byte>.IndexOf((byte)'\n')` executes hardware SIMD-accelerated byte scanning, and `Encoding.UTF8.GetString(ReadOnlySpan<byte>)` decodes UTF-8 strings directly from memory slices with zero heap allocations. Additionally, checking if all accumulated bytes are consumed (`index + 1 >= _buffer.Count`) allows an $O(1)$ `_buffer.Clear()` operation instead of calling $O(N)$ `_buffer.RemoveRange(0, count)` which shifts underlying array elements.
+
+**Action:** When working with dynamic byte buffers or frame parsers in .NET 8, use `CollectionsMarshal.AsSpan` to expose `ReadOnlySpan<byte>` for zero-allocation SIMD slicing and string decoding, and prefer `Clear()` over `RemoveRange` when consuming the entire buffer.
