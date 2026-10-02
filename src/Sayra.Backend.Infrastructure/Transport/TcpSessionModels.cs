@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -34,30 +35,24 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public void Append(byte[] data, int length)
         {
+            if (data == null || length <= 0) return;
+
             lock (_lock)
             {
-                if (_buffer.Count + length > _maxMessageSize && !_buffer.Contains((byte)'\n'))
-                {
-                    bool containsNewlineInNewData = false;
-                    for (int i = 0; i < length; i++)
-                    {
-                        if (data[i] == (byte)'\n')
-                        {
-                            containsNewlineInNewData = true;
-                            break;
-                        }
-                    }
+                // Performance optimization: Use ReadOnlySpan for SIMD-accelerated newline scanning and zero-allocation checks
+                ReadOnlySpan<byte> incoming = data.AsSpan(0, length);
+                ReadOnlySpan<byte> currentBuffer = CollectionsMarshal.AsSpan(_buffer);
 
-                    if (!containsNewlineInNewData)
+                if (_buffer.Count + length > _maxMessageSize && currentBuffer.IndexOf((byte)'\n') < 0)
+                {
+                    if (incoming.IndexOf((byte)'\n') < 0)
                     {
                         throw new InvalidOperationException($"Maximum message frame size ({_maxMessageSize} bytes) exceeded.");
                     }
                 }
 
-                for (int i = 0; i < length; i++)
-                {
-                    _buffer.Add(data[i]);
-                }
+                // Performance optimization: Bulk copy bytes into buffer using AddRange instead of byte-by-byte iteration
+                _buffer.AddRange(new ArraySegment<byte>(data, 0, length));
             }
         }
 
@@ -66,23 +61,38 @@ namespace Sayra.Backend.Infrastructure.Transport
             var frames = new List<string>();
             lock (_lock)
             {
-                int index;
-                while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
+                while (_buffer.Count > 0)
                 {
+                    // Performance optimization: Access internal List buffer as ReadOnlySpan without allocations or copying
+                    ReadOnlySpan<byte> span = CollectionsMarshal.AsSpan(_buffer);
+                    int index = span.IndexOf((byte)'\n');
+                    if (index < 0)
+                    {
+                        break;
+                    }
+
                     if (index > _maxMessageSize)
                     {
                         _buffer.Clear();
                         throw new InvalidOperationException($"Frame length ({index} bytes) exceeds maximum limit of {_maxMessageSize} bytes.");
                     }
 
-                    byte[] frameBytes = new byte[index];
-                    _buffer.CopyTo(0, frameBytes, 0, index);
-                    _buffer.RemoveRange(0, index + 1);
-
-                    string frameStr = Encoding.UTF8.GetString(frameBytes).Trim();
+                    // Performance optimization: Direct string decoding from ReadOnlySpan slice without allocating intermediate byte[] arrays
+                    ReadOnlySpan<byte> frameSpan = span.Slice(0, index);
+                    string frameStr = Encoding.UTF8.GetString(frameSpan).Trim();
                     if (!string.IsNullOrEmpty(frameStr))
                     {
                         frames.Add(frameStr);
+                    }
+
+                    if (index + 1 >= _buffer.Count)
+                    {
+                        // Performance optimization: Fast O(1) buffer clear when all accumulated bytes are consumed
+                        _buffer.Clear();
+                    }
+                    else
+                    {
+                        _buffer.RemoveRange(0, index + 1);
                     }
                 }
 
