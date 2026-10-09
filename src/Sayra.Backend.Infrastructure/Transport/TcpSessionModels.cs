@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Sayra.Backend.Infrastructure.Transport
@@ -20,6 +21,8 @@ namespace Sayra.Backend.Infrastructure.Transport
     /// <summary>
     /// Thread-safe byte buffer accumulator that parses TCP packet segments split by '\n',
     /// enforcing maximum message frame size limits for memory protection.
+    /// Optimized using ReadOnlySpan&lt;byte&gt; and CollectionsMarshal.AsSpan for zero-allocation frame decoding
+    /// and SIMD-accelerated newline scanning.
     /// </summary>
     public class TcpFrameParser
     {
@@ -34,30 +37,27 @@ namespace Sayra.Backend.Infrastructure.Transport
 
         public void Append(byte[] data, int length)
         {
+            if (length <= 0) return;
+
+            var incomingSpan = new ReadOnlySpan<byte>(data, 0, length);
+
             lock (_lock)
             {
-                if (_buffer.Count + length > _maxMessageSize && !_buffer.Contains((byte)'\n'))
+                if (_buffer.Count + length > _maxMessageSize)
                 {
-                    bool containsNewlineInNewData = false;
-                    for (int i = 0; i < length; i++)
+                    ReadOnlySpan<byte> bufSpan = CollectionsMarshal.AsSpan(_buffer);
+                    bool hasNewlineInBuf = bufSpan.IndexOf((byte)'\n') >= 0;
+                    if (!hasNewlineInBuf)
                     {
-                        if (data[i] == (byte)'\n')
+                        bool hasNewlineInIncoming = incomingSpan.IndexOf((byte)'\n') >= 0;
+                        if (!hasNewlineInIncoming)
                         {
-                            containsNewlineInNewData = true;
-                            break;
+                            throw new InvalidOperationException($"Maximum message frame size ({_maxMessageSize} bytes) exceeded.");
                         }
                     }
-
-                    if (!containsNewlineInNewData)
-                    {
-                        throw new InvalidOperationException($"Maximum message frame size ({_maxMessageSize} bytes) exceeded.");
-                    }
                 }
 
-                for (int i = 0; i < length; i++)
-                {
-                    _buffer.Add(data[i]);
-                }
+                _buffer.AddRange(incomingSpan);
             }
         }
 
@@ -66,23 +66,36 @@ namespace Sayra.Backend.Infrastructure.Transport
             var frames = new List<string>();
             lock (_lock)
             {
-                int index;
-                while ((index = _buffer.IndexOf((byte)'\n')) >= 0)
+                while (true)
                 {
+                    ReadOnlySpan<byte> bufSpan = CollectionsMarshal.AsSpan(_buffer);
+                    int index = bufSpan.IndexOf((byte)'\n');
+                    if (index < 0)
+                    {
+                        break;
+                    }
+
                     if (index > _maxMessageSize)
                     {
                         _buffer.Clear();
                         throw new InvalidOperationException($"Frame length ({index} bytes) exceeds maximum limit of {_maxMessageSize} bytes.");
                     }
 
-                    byte[] frameBytes = new byte[index];
-                    _buffer.CopyTo(0, frameBytes, 0, index);
-                    _buffer.RemoveRange(0, index + 1);
-
-                    string frameStr = Encoding.UTF8.GetString(frameBytes).Trim();
+                    // Zero-allocation string decoding directly from memory span slice
+                    ReadOnlySpan<byte> frameSpan = bufSpan.Slice(0, index);
+                    string frameStr = Encoding.UTF8.GetString(frameSpan).Trim();
                     if (!string.IsNullOrEmpty(frameStr))
                     {
                         frames.Add(frameStr);
+                    }
+
+                    if (index + 1 == _buffer.Count)
+                    {
+                        _buffer.Clear();
+                    }
+                    else
+                    {
+                        _buffer.RemoveRange(0, index + 1);
                     }
                 }
 
