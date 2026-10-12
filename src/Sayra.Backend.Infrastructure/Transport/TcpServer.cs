@@ -23,6 +23,7 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Security;
 using Sayra.Backend.Application.Workstations;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain;
 using Sayra.Backend.Infrastructure.Configuration.Options;
 
@@ -461,10 +462,8 @@ namespace Sayra.Backend.Infrastructure.Transport
             Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope? envelope;
             try
             {
-                envelope = JsonSerializer.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(frame, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                // Bolt Performance Optimization: Reuse static cached JsonSerializerOptions to avoid per-frame reflection allocation
+                envelope = JsonSerializer.Deserialize<Sayra.Backend.Application.Abstractions.Security.SecureMessageEnvelope>(frame, ProtocolSerialization.Options);
             }
             catch (JsonException ex)
             {
@@ -522,10 +521,9 @@ namespace Sayra.Backend.Infrastructure.Transport
                             try
                             {
                                 using var scope = _serviceScopeFactory.CreateScope();
-                                var heartbeatMsg = JsonSerializer.Deserialize<Sayra.Backend.Contracts.HeartbeatMessage>(plaintext, new JsonSerializerOptions
-                                {
-                                    PropertyNameCaseInsensitive = true
-                                }) ?? new Sayra.Backend.Contracts.HeartbeatMessage { PcId = connection.PcId ?? "", Timestamp = DateTime.UtcNow };
+                                // Bolt Performance Optimization: Reuse static cached JsonSerializerOptions to avoid per-frame reflection allocation
+                                var heartbeatMsg = JsonSerializer.Deserialize<Sayra.Backend.Contracts.HeartbeatMessage>(plaintext, ProtocolSerialization.Options)
+                                    ?? new Sayra.Backend.Contracts.HeartbeatMessage { PcId = connection.PcId ?? "", Timestamp = DateTime.UtcNow };
 
                                 var dbContext = scope.ServiceProvider.GetRequiredService<Infrastructure.Persistence.ApplicationDbContext>();
                                 var pcIdUpper = connection.PcId?.Trim().ToUpperInvariant() ?? "";
@@ -634,10 +632,8 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 telemElem = tProp;
                             }
 
-                            var model = JsonSerializer.Deserialize<Sayra.Backend.Contracts.TelemetryModel>(telemElem.GetRawText(), new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            });
+                            // Bolt Performance Optimization: Deserialize directly from JsonElement to eliminate intermediate string allocations and reuse static JsonSerializerOptions
+                            var model = JsonSerializer.Deserialize<Sayra.Backend.Contracts.TelemetryModel>(telemElem, ProtocolSerialization.Options);
 
                             if (model != null)
                             {
@@ -674,10 +670,8 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 evtElem = eProp;
                             }
 
-                            var evtDto = JsonSerializer.Deserialize<Sayra.Backend.Contracts.ClientEventEnvelopeDto>(evtElem.GetRawText(), new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            });
+                            // Bolt Performance Optimization: Deserialize directly from JsonElement to eliminate intermediate string allocations and reuse static JsonSerializerOptions
+                            var evtDto = JsonSerializer.Deserialize<Sayra.Backend.Contracts.ClientEventEnvelopeDto>(evtElem, ProtocolSerialization.Options);
 
                             if (evtDto != null)
                             {
@@ -734,10 +728,8 @@ namespace Sayra.Backend.Infrastructure.Transport
                                 batchElem = bProp;
                             }
 
-                            var batchReq = JsonSerializer.Deserialize<Sayra.Backend.Contracts.OfflineBatchRequest>(batchElem.GetRawText(), new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            });
+                            // Bolt Performance Optimization: Deserialize directly from JsonElement to eliminate intermediate string allocations and reuse static JsonSerializerOptions
+                            var batchReq = JsonSerializer.Deserialize<Sayra.Backend.Contracts.OfflineBatchRequest>(batchElem, ProtocolSerialization.Options);
 
                             if (batchReq != null)
                             {
@@ -775,10 +767,8 @@ namespace Sayra.Backend.Infrastructure.Transport
                         {
                             if (root.TryGetProperty("payload", out var payloadProp))
                             {
-                                var commandPayload = JsonSerializer.Deserialize<Sayra.Backend.Contracts.SessionCommandPayload>(payloadProp.GetRawText(), new JsonSerializerOptions
-                                {
-                                    PropertyNameCaseInsensitive = true
-                                });
+                                // Bolt Performance Optimization: Deserialize directly from JsonElement to eliminate intermediate string allocations and reuse static JsonSerializerOptions
+                                var commandPayload = JsonSerializer.Deserialize<Sayra.Backend.Contracts.SessionCommandPayload>(payloadProp, ProtocolSerialization.Options);
 
                                 if (commandPayload != null && !string.IsNullOrEmpty(commandPayload.Action))
                                 {
