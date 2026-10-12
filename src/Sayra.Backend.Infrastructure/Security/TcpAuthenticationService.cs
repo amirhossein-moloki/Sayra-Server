@@ -17,6 +17,7 @@ using Sayra.Backend.Application.Abstractions.Security;
 using Sayra.Backend.Application.Abstractions.Transport;
 using Sayra.Backend.Application.Workstations;
 using Sayra.Backend.Domain;
+using Sayra.Backend.Contracts;
 using Sayra.Backend.Domain.Exceptions;
 using Sayra.Backend.Infrastructure.Transport;
 
@@ -122,10 +123,8 @@ namespace Sayra.Backend.Infrastructure.Security
                 AuthResponseDto? responseDto;
                 try
                 {
-                    responseDto = JsonSerializer.Deserialize<AuthResponseDto>(responseLine, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                    // Bolt Performance Optimization: Reuse static cached JsonSerializerOptions to avoid per-authentication reflection allocation
+                    responseDto = JsonSerializer.Deserialize<AuthResponseDto>(responseLine, ProtocolSerialization.Options);
                 }
                 catch (JsonException ex)
                 {
