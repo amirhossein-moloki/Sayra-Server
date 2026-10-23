@@ -1,0 +1,3 @@
+## 2026-09-10 - Pre-compiled static Regex for MAC address domain validation
+**Learning:** Instantiating `new Regex(...)` inside domain entity validation methods like `Workstation.NormalizeAndValidate()` creates unnecessary heap allocations and regex engine parsing overhead on every validation call. Using a `private static readonly Regex` field with `RegexOptions.Compiled` eliminates per-call heap allocation and speeds up regular expression evaluation in hot path domain operations.
+**Action:** Always check domain entities and validation services for per-call `new Regex(...)` instantiations and convert them to static compiled regex fields.
