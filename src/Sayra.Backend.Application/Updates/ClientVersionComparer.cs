@@ -1,5 +1,4 @@
 using System;
-using System.Text.RegularExpressions;
 using Sayra.Backend.Domain.Exceptions;
 
 #nullable enable
@@ -8,8 +7,6 @@ namespace Sayra.Backend.Application.Updates
 {
     public static class ClientVersionComparer
     {
-        private static readonly Regex CleanVersionRegex = new(@"^[vV]?(\d+)\.(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([a-zA-Z0-9\.\-]+))?(?:\+([a-zA-Z0-9\.\-]+))?$", RegexOptions.Compiled);
-
         public static bool TryParseVersion(string rawVersion, out Version parsedVersion, out string? prerelease)
         {
             parsedVersion = new Version(0, 0, 0, 0);
@@ -20,34 +17,114 @@ namespace Sayra.Backend.Application.Updates
                 return false;
             }
 
-            var trimmed = rawVersion.Trim();
-            var match = CleanVersionRegex.Match(trimmed);
-            if (!match.Success)
+            ReadOnlySpan<char> span = rawVersion.AsSpan().Trim();
+
+            if (span.IsEmpty)
             {
                 return false;
             }
 
-            if (!int.TryParse(match.Groups[1].Value, out int major) ||
-                !int.TryParse(match.Groups[2].Value, out int minor))
+            // Strip optional 'v' or 'V' prefix
+            if (span[0] == 'v' || span[0] == 'V')
+            {
+                span = span.Slice(1);
+            }
+
+            if (span.IsEmpty)
             {
                 return false;
             }
 
+            // Extract optional build metadata tag starting after '+'
+            int plusIndex = span.IndexOf('+');
+            if (plusIndex >= 0)
+            {
+                ReadOnlySpan<char> buildMeta = span.Slice(plusIndex + 1);
+                if (buildMeta.IsEmpty || !IsValidTag(buildMeta))
+                {
+                    return false;
+                }
+                span = span.Slice(0, plusIndex);
+            }
+
+            // Extract optional prerelease tag starting after '-'
+            int dashIndex = span.IndexOf('-');
+            if (dashIndex >= 0)
+            {
+                ReadOnlySpan<char> pre = span.Slice(dashIndex + 1);
+                if (pre.IsEmpty || !IsValidTag(pre))
+                {
+                    return false;
+                }
+                prerelease = pre.ToString();
+                span = span.Slice(0, dashIndex);
+            }
+
+            // Parse dot-separated numeric version components: major.minor[.build[.revision]]
+            int major = 0;
+            int minor = 0;
             int build = 0;
-            if (match.Groups[3].Success && !int.TryParse(match.Groups[3].Value, out build))
+            int revision = 0;
+
+            int dotCount = 0;
+            int currentStart = 0;
+
+            for (int i = 0; i <= span.Length; i++)
             {
-                return false;
+                if (i == span.Length || span[i] == '.')
+                {
+                    ReadOnlySpan<char> segment = span.Slice(currentStart, i - currentStart);
+                    if (segment.IsEmpty)
+                    {
+                        return false;
+                    }
+
+                    if (!int.TryParse(segment, out int val) || val < 0)
+                    {
+                        return false;
+                    }
+
+                    switch (dotCount)
+                    {
+                        case 0:
+                            major = val;
+                            break;
+                        case 1:
+                            minor = val;
+                            break;
+                        case 2:
+                            build = val;
+                            break;
+                        case 3:
+                            revision = val;
+                            break;
+                        default:
+                            return false; // Exceeds 4 numeric components
+                    }
+
+                    dotCount++;
+                    currentStart = i + 1;
+                }
             }
 
-            int revision = 0;
-            if (match.Groups[4].Success && !int.TryParse(match.Groups[4].Value, out revision))
+            if (dotCount < 2) // Minimum major.minor required
             {
                 return false;
             }
 
             parsedVersion = new Version(major, minor, build, revision);
-            prerelease = match.Groups[5].Success ? match.Groups[5].Value : null;
+            return true;
+        }
 
+        private static bool IsValidTag(ReadOnlySpan<char> tag)
+        {
+            foreach (char c in tag)
+            {
+                if (!char.IsAsciiLetterOrDigit(c) && c != '.' && c != '-')
+                {
+                    return false;
+                }
+            }
             return true;
         }
 
