@@ -81,21 +81,62 @@ namespace Sayra.Backend.Application.Configuration
             var normA = hashA.Trim().ToLowerInvariant();
             var normB = hashB.Trim().ToLowerInvariant();
 
-            if (normA.Length != normB.Length)
+            if (normA.Length != normB.Length || normA.Length % 2 != 0)
             {
                 return false;
             }
 
             try
             {
-                byte[] bytesA = Convert.FromHexString(normA);
-                byte[] bytesB = Convert.FromHexString(normB);
-                return CryptographicOperations.FixedTimeEquals(bytesA, bytesB);
+                // Performance Optimization: Use stackalloc byte spans with fast zero-allocation hex decoding
+                // to decode and compare hex strings in constant time without heap byte[] allocations.
+                int byteCount = normA.Length / 2;
+                Span<byte> bytesA = byteCount <= 128 ? stackalloc byte[byteCount] : new byte[byteCount];
+                Span<byte> bytesB = byteCount <= 128 ? stackalloc byte[byteCount] : new byte[byteCount];
+
+                if (!TryHexToBytes(normA, bytesA, out int writtenA) ||
+                    !TryHexToBytes(normB, bytesB, out int writtenB) ||
+                    writtenA != writtenB)
+                {
+                    return false;
+                }
+
+                return CryptographicOperations.FixedTimeEquals(bytesA[..writtenA], bytesB[..writtenB]);
             }
             catch
             {
                 return false;
             }
+        }
+
+        private static bool TryHexToBytes(ReadOnlySpan<char> hex, Span<byte> bytes, out int bytesWritten)
+        {
+            bytesWritten = 0;
+            if (hex.Length % 2 != 0 || bytes.Length < hex.Length / 2)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < hex.Length; i += 2)
+            {
+                int hi = GetHexVal(hex[i]);
+                int lo = GetHexVal(hex[i + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                bytes[bytesWritten++] = (byte)((hi << 4) | lo);
+            }
+            return true;
+        }
+
+        private static int GetHexVal(char hex)
+        {
+            int val = hex;
+            if (val >= '0' && val <= '9') return val - '0';
+            if (val >= 'a' && val <= 'f') return val - 'a' + 10;
+            if (val >= 'A' && val <= 'F') return val - 'A' + 10;
+            return -1;
         }
     }
 }
