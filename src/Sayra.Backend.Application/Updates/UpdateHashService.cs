@@ -59,12 +59,47 @@ namespace Sayra.Backend.Application.Updates
                 throw new InvalidDomainException("INVALID_HASH_FORMAT", "SHA-256 hash must be 64 hexadecimal characters.");
             }
 
-            if (!CryptographicOperations.FixedTimeEquals(
-                System.Text.Encoding.UTF8.GetBytes(normalizedCalculated),
-                System.Text.Encoding.UTF8.GetBytes(normalizedDeclared)))
+            // Performance Optimization: Use stackalloc byte spans with zero-allocation hex decoding
+            // to decode and compare SHA-256 hex bytes in constant time without allocating heap byte[] arrays.
+            Span<byte> bytesA = stackalloc byte[32];
+            Span<byte> bytesB = stackalloc byte[32];
+
+            if (!TryHexToBytes(normalizedCalculated, bytesA, out _) ||
+                !TryHexToBytes(normalizedDeclared, bytesB, out _) ||
+                !CryptographicOperations.FixedTimeEquals(bytesA, bytesB))
             {
                 throw new InvalidDomainException("HASH_MISMATCH", $"Calculated SHA-256 hash '{normalizedCalculated}' does not match declared hash '{normalizedDeclared}'.");
             }
+        }
+
+        private static bool TryHexToBytes(ReadOnlySpan<char> hex, Span<byte> bytes, out int bytesWritten)
+        {
+            bytesWritten = 0;
+            if (hex.Length % 2 != 0 || bytes.Length < hex.Length / 2)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < hex.Length; i += 2)
+            {
+                int hi = GetHexVal(hex[i]);
+                int lo = GetHexVal(hex[i + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                bytes[bytesWritten++] = (byte)((hi << 4) | lo);
+            }
+            return true;
+        }
+
+        private static int GetHexVal(char hex)
+        {
+            int val = hex;
+            if (val >= '0' && val <= '9') return val - '0';
+            if (val >= 'a' && val <= 'f') return val - 'a' + 10;
+            if (val >= 'A' && val <= 'F') return val - 'A' + 10;
+            return -1;
         }
     }
 }
