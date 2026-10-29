@@ -11,26 +11,31 @@ namespace Sayra.Backend.Application.Telemetry
         {
             var utc = timestamp.Kind == DateTimeKind.Utc ? timestamp : DateTime.SpecifyKind(timestamp, DateTimeKind.Utc);
 
-            return granularity.ToLowerInvariant() switch
+            if (string.Equals(granularity, "1m", StringComparison.OrdinalIgnoreCase))
             {
-                "1m" => (
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute, 0, DateTimeKind.Utc),
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute, 0, DateTimeKind.Utc).AddMinutes(1)
-                ),
-                "5m" => (
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, (utc.Minute / 5) * 5, 0, DateTimeKind.Utc),
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, (utc.Minute / 5) * 5, 0, DateTimeKind.Utc).AddMinutes(5)
-                ),
-                "1h" => (
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, DateTimeKind.Utc),
-                    new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, DateTimeKind.Utc).AddHours(1)
-                ),
-                "1d" => (
-                    new DateTime(utc.Year, utc.Month, utc.Day, 0, 0, 0, DateTimeKind.Utc),
-                    new DateTime(utc.Year, utc.Month, utc.Day, 0, 0, 0, DateTimeKind.Utc).AddDays(1)
-                ),
-                _ => throw new ArgumentException($"Unsupported granularity '{granularity}'", nameof(granularity))
-            };
+                var start = new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute, 0, DateTimeKind.Utc);
+                return (start, start.AddMinutes(1));
+            }
+
+            if (string.Equals(granularity, "5m", StringComparison.OrdinalIgnoreCase))
+            {
+                var start = new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, (utc.Minute / 5) * 5, 0, DateTimeKind.Utc);
+                return (start, start.AddMinutes(5));
+            }
+
+            if (string.Equals(granularity, "1h", StringComparison.OrdinalIgnoreCase))
+            {
+                var start = new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, DateTimeKind.Utc);
+                return (start, start.AddHours(1));
+            }
+
+            if (string.Equals(granularity, "1d", StringComparison.OrdinalIgnoreCase))
+            {
+                var start = new DateTime(utc.Year, utc.Month, utc.Day, 0, 0, 0, DateTimeKind.Utc);
+                return (start, start.AddDays(1));
+            }
+
+            throw new ArgumentException($"Unsupported granularity '{granularity}'", nameof(granularity));
         }
 
         public IReadOnlyList<TelemetryAggregateRecord> AggregateRawRecords(
@@ -63,54 +68,108 @@ namespace Sayra.Backend.Application.Telemetry
                 // Expected sample count for full window based on default 30s interval
                 int expectedSamples = granularity switch
                 {
-                    "1m" => 2,
-                    "5m" => 10,
-                    "1h" => 120,
-                    "1d" => 2880,
+                    "1m" or "1M" => 2,
+                    "5m" or "5M" => 10,
+                    "1h" or "1H" => 120,
+                    "1d" or "1D" => 2880,
                     _ => 1
                 };
 
                 bool isPartial = count < expectedSamples;
 
-                // Gauges: CPU & RAM
-                var cpus = recordsInWindow.Select(r => r.Cpu).OrderBy(v => v).ToList();
-                var rams = recordsInWindow.Select(r => r.Ram).OrderBy(v => v).ToList();
+                var cpus = new List<double>(count);
+                var rams = new List<double>(count);
 
-                // Counter deltas with reset detection
-                double uptimeDelta = CalculateDoubleCounterDelta(recordsInWindow.Select(r => r.Uptime).ToList());
-                int launchesDelta = CalculateIntCounterDelta(recordsInWindow.Select(r => r.TotalLaunches).ToList());
-                int crashesDelta = CalculateIntCounterDelta(recordsInWindow.Select(r => r.TotalCrashes).ToList());
-                int restartsDelta = CalculateIntCounterDelta(recordsInWindow.Select(r => r.TotalRestarts).ToList());
+                double uptimeDelta = 0;
+                int launchesDelta = 0;
+                int crashesDelta = 0;
+                int restartsDelta = 0;
 
-                // Active Game Stats
-                var gameRecords = recordsInWindow
-                    .Where(r => !string.IsNullOrWhiteSpace(r.RunningGameName))
-                    .ToList();
+                Dictionary<string, int>? gameCounts = null;
+                double gameCpuSum = 0;
+                double? gameCpuMax = null;
+                int gameCpuCount = 0;
 
-                string? primaryGame = gameRecords
-                    .GroupBy(r => r.RunningGameName!)
-                    .OrderByDescending(grp => grp.Count())
-                    .Select(grp => grp.Key)
-                    .FirstOrDefault();
+                double gameRamSum = 0;
+                double? gameRamMax = null;
+                int gameRamCount = 0;
 
-                int gameCount = gameRecords.Count;
-                double? gameCpuAvg = gameCount > 0 && gameRecords.Any(r => r.RunningGameCpu.HasValue)
-                    ? gameRecords.Where(r => r.RunningGameCpu.HasValue).Average(r => r.RunningGameCpu!.Value)
-                    : null;
-                double? gameCpuMax = gameCount > 0 && gameRecords.Any(r => r.RunningGameCpu.HasValue)
-                    ? gameRecords.Where(r => r.RunningGameCpu.HasValue).Max(r => r.RunningGameCpu!.Value)
-                    : null;
+                double? gameDurationMax = null;
+                int gameRecordCount = 0;
 
-                double? gameRamAvg = gameCount > 0 && gameRecords.Any(r => r.RunningGameRam.HasValue)
-                    ? gameRecords.Where(r => r.RunningGameRam.HasValue).Average(r => r.RunningGameRam!.Value)
-                    : null;
-                double? gameRamMax = gameCount > 0 && gameRecords.Any(r => r.RunningGameRam.HasValue)
-                    ? gameRecords.Where(r => r.RunningGameRam.HasValue).Max(r => r.RunningGameRam!.Value)
-                    : null;
+                // Single pass through ordered records in window
+                for (int i = 0; i < count; i++)
+                {
+                    var r = recordsInWindow[i];
+                    cpus.Add(r.Cpu);
+                    rams.Add(r.Ram);
 
-                double? gameDurationMax = gameCount > 0 && gameRecords.Any(r => r.RunningGameDuration.HasValue)
-                    ? gameRecords.Where(r => r.RunningGameDuration.HasValue).Max(r => r.RunningGameDuration!.Value)
-                    : null;
+                    if (i > 0)
+                    {
+                        var prev = recordsInWindow[i - 1];
+                        uptimeDelta += r.Uptime >= prev.Uptime ? (r.Uptime - prev.Uptime) : r.Uptime;
+                        launchesDelta += r.TotalLaunches >= prev.TotalLaunches ? (r.TotalLaunches - prev.TotalLaunches) : r.TotalLaunches;
+                        crashesDelta += r.TotalCrashes >= prev.TotalCrashes ? (r.TotalCrashes - prev.TotalCrashes) : r.TotalCrashes;
+                        restartsDelta += r.TotalRestarts >= prev.TotalRestarts ? (r.TotalRestarts - prev.TotalRestarts) : r.TotalRestarts;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(r.RunningGameName))
+                    {
+                        gameRecordCount++;
+                        gameCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                        gameCounts[r.RunningGameName] = gameCounts.TryGetValue(r.RunningGameName, out int cnt) ? cnt + 1 : 1;
+
+                        if (r.RunningGameCpu.HasValue)
+                        {
+                            gameCpuSum += r.RunningGameCpu.Value;
+                            gameCpuCount++;
+                            if (!gameCpuMax.HasValue || r.RunningGameCpu.Value > gameCpuMax.Value)
+                                gameCpuMax = r.RunningGameCpu.Value;
+                        }
+
+                        if (r.RunningGameRam.HasValue)
+                        {
+                            gameRamSum += r.RunningGameRam.Value;
+                            gameRamCount++;
+                            if (!gameRamMax.HasValue || r.RunningGameRam.Value > gameRamMax.Value)
+                                gameRamMax = r.RunningGameRam.Value;
+                        }
+
+                        if (r.RunningGameDuration.HasValue)
+                        {
+                            if (!gameDurationMax.HasValue || r.RunningGameDuration.Value > gameDurationMax.Value)
+                                gameDurationMax = r.RunningGameDuration.Value;
+                        }
+                    }
+                }
+
+                cpus.Sort();
+                rams.Sort();
+
+                string? primaryGame = null;
+                if (gameCounts != null && gameCounts.Count > 0)
+                {
+                    int maxCount = -1;
+                    foreach (var kvp in gameCounts)
+                    {
+                        if (kvp.Value > maxCount)
+                        {
+                            maxCount = kvp.Value;
+                            primaryGame = kvp.Key;
+                        }
+                    }
+                }
+
+                double? gameCpuAvg = gameCpuCount > 0 ? gameCpuSum / gameCpuCount : null;
+                double? gameRamAvg = gameRamCount > 0 ? gameRamSum / gameRamCount : null;
+
+                double cpuSum = 0;
+                for (int i = 0; i < count; i++) cpuSum += cpus[i];
+                double cpuAvg = cpuSum / count;
+
+                double ramSum = 0;
+                for (int i = 0; i < count; i++) ramSum += rams[i];
+                double ramAvg = ramSum / count;
 
                 var agg = new TelemetryAggregateRecord
                 {
@@ -124,16 +183,16 @@ namespace Sayra.Backend.Application.Telemetry
                     SampleCount = count,
                     IsPartial = isPartial,
 
-                    CpuMin = cpus.First(),
-                    CpuMax = cpus.Last(),
-                    CpuAvg = cpus.Average(),
+                    CpuMin = cpus[0],
+                    CpuMax = cpus[count - 1],
+                    CpuAvg = cpuAvg,
                     CpuP50 = CalculatePercentile(cpus, 0.50),
                     CpuP95 = CalculatePercentile(cpus, 0.95),
                     CpuP99 = CalculatePercentile(cpus, 0.99),
 
-                    RamMin = rams.First(),
-                    RamMax = rams.Last(),
-                    RamAvg = rams.Average(),
+                    RamMin = rams[0],
+                    RamMax = rams[count - 1],
+                    RamAvg = ramAvg,
                     RamP50 = CalculatePercentile(rams, 0.50),
                     RamP95 = CalculatePercentile(rams, 0.95),
                     RamP99 = CalculatePercentile(rams, 0.99),
@@ -144,7 +203,7 @@ namespace Sayra.Backend.Application.Telemetry
                     RestartsDelta = restartsDelta,
 
                     PrimaryGameName = primaryGame,
-                    GameSampleCount = gameCount,
+                    GameSampleCount = gameRecordCount,
                     GameCpuAvg = gameCpuAvg,
                     GameCpuMax = gameCpuMax,
                     GameRamAvg = gameRamAvg,
@@ -178,58 +237,134 @@ namespace Sayra.Backend.Application.Telemetry
             foreach (var g in groups)
             {
                 var items = g.OrderBy(a => a.WindowStart).ToList();
-                if (items.Count == 0) continue;
+                int itemCount = items.Count;
+                if (itemCount == 0) continue;
 
                 var first = items[0];
                 var (winStart, winEnd) = (g.Key.start, g.Key.end);
 
-                int totalSamples = items.Sum(i => i.SampleCount);
-                bool isPartial = items.Any(i => i.IsPartial);
+                int totalSamples = 0;
+                bool isPartial = false;
 
-                double cpuMin = items.Min(i => i.CpuMin);
-                double cpuMax = items.Max(i => i.CpuMax);
-                double cpuAvg = totalSamples > 0 ? items.Sum(i => i.CpuAvg * i.SampleCount) / totalSamples : 0;
-                double cpuP50 = items.Average(i => i.CpuP50);
-                double cpuP95 = items.Max(i => i.CpuP95);
-                double cpuP99 = items.Max(i => i.CpuP99);
+                double cpuMin = double.MaxValue;
+                double cpuMax = double.MinValue;
+                double cpuWeightedSum = 0;
+                double cpuP50Sum = 0;
+                double cpuP95Max = double.MinValue;
+                double cpuP99Max = double.MinValue;
 
-                double ramMin = items.Min(i => i.RamMin);
-                double ramMax = items.Max(i => i.RamMax);
-                double ramAvg = totalSamples > 0 ? items.Sum(i => i.RamAvg * i.SampleCount) / totalSamples : 0;
-                double ramP50 = items.Average(i => i.RamP50);
-                double ramP95 = items.Max(i => i.RamP95);
-                double ramP99 = items.Max(i => i.RamP99);
+                double ramMin = double.MaxValue;
+                double ramMax = double.MinValue;
+                double ramWeightedSum = 0;
+                double ramP50Sum = 0;
+                double ramP95Max = double.MinValue;
+                double ramP99Max = double.MinValue;
 
-                double uptimeDelta = items.Sum(i => i.UptimeDelta);
-                int launchesDelta = items.Sum(i => i.LaunchesDelta);
-                int crashesDelta = items.Sum(i => i.CrashesDelta);
-                int restartsDelta = items.Sum(i => i.RestartsDelta);
+                double uptimeDelta = 0;
+                int launchesDelta = 0;
+                int crashesDelta = 0;
+                int restartsDelta = 0;
 
-                var gameItems = items.Where(i => !string.IsNullOrWhiteSpace(i.PrimaryGameName)).ToList();
-                string? primaryGame = gameItems
-                    .GroupBy(i => i.PrimaryGameName!)
-                    .OrderByDescending(grp => grp.Sum(i => i.GameSampleCount))
-                    .Select(grp => grp.Key)
-                    .FirstOrDefault();
+                Dictionary<string, int>? gameCounts = null;
+                int gameSampleCount = 0;
 
-                int gameSampleCount = items.Sum(i => i.GameSampleCount);
-                double? gameCpuAvg = gameItems.Any(i => i.GameCpuAvg.HasValue)
-                    ? gameItems.Where(i => i.GameCpuAvg.HasValue).Average(i => i.GameCpuAvg!.Value)
-                    : null;
-                double? gameCpuMax = gameItems.Any(i => i.GameCpuMax.HasValue)
-                    ? gameItems.Where(i => i.GameCpuMax.HasValue).Max(i => i.GameCpuMax!.Value)
-                    : null;
+                double gameCpuSum = 0;
+                int gameCpuCount = 0;
+                double? gameCpuMax = null;
 
-                double? gameRamAvg = gameItems.Any(i => i.GameRamAvg.HasValue)
-                    ? gameItems.Where(i => i.GameRamAvg.HasValue).Average(i => i.GameRamAvg!.Value)
-                    : null;
-                double? gameRamMax = gameItems.Any(i => i.GameRamMax.HasValue)
-                    ? gameItems.Where(i => i.GameRamMax.HasValue).Max(i => i.GameRamMax!.Value)
-                    : null;
+                double gameRamSum = 0;
+                int gameRamCount = 0;
+                double? gameRamMax = null;
 
-                double? gameDurationMax = gameItems.Any(i => i.GameDurationMax.HasValue)
-                    ? gameItems.Where(i => i.GameDurationMax.HasValue).Max(i => i.GameDurationMax!.Value)
-                    : null;
+                double? gameDurationMax = null;
+
+                // Single pass through rollup items
+                for (int i = 0; i < itemCount; i++)
+                {
+                    var item = items[i];
+                    totalSamples += item.SampleCount;
+                    if (item.IsPartial) isPartial = true;
+
+                    if (item.CpuMin < cpuMin) cpuMin = item.CpuMin;
+                    if (item.CpuMax > cpuMax) cpuMax = item.CpuMax;
+                    cpuWeightedSum += item.CpuAvg * item.SampleCount;
+                    cpuP50Sum += item.CpuP50;
+                    if (item.CpuP95 > cpuP95Max) cpuP95Max = item.CpuP95;
+                    if (item.CpuP99 > cpuP99Max) cpuP99Max = item.CpuP99;
+
+                    if (item.RamMin < ramMin) ramMin = item.RamMin;
+                    if (item.RamMax > ramMax) ramMax = item.RamMax;
+                    ramWeightedSum += item.RamAvg * item.SampleCount;
+                    ramP50Sum += item.RamP50;
+                    if (item.RamP95 > ramP95Max) ramP95Max = item.RamP95;
+                    if (item.RamP99 > ramP99Max) ramP99Max = item.RamP99;
+
+                    uptimeDelta += item.UptimeDelta;
+                    launchesDelta += item.LaunchesDelta;
+                    crashesDelta += item.CrashesDelta;
+                    restartsDelta += item.RestartsDelta;
+
+                    gameSampleCount += item.GameSampleCount;
+
+                    if (!string.IsNullOrWhiteSpace(item.PrimaryGameName))
+                    {
+                        gameCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                        gameCounts[item.PrimaryGameName] = gameCounts.TryGetValue(item.PrimaryGameName, out int cnt)
+                            ? cnt + item.GameSampleCount
+                            : item.GameSampleCount;
+                    }
+
+                    if (item.GameCpuAvg.HasValue)
+                    {
+                        gameCpuSum += item.GameCpuAvg.Value;
+                        gameCpuCount++;
+                    }
+                    if (item.GameCpuMax.HasValue)
+                    {
+                        if (!gameCpuMax.HasValue || item.GameCpuMax.Value > gameCpuMax.Value)
+                            gameCpuMax = item.GameCpuMax.Value;
+                    }
+
+                    if (item.GameRamAvg.HasValue)
+                    {
+                        gameRamSum += item.GameRamAvg.Value;
+                        gameRamCount++;
+                    }
+                    if (item.GameRamMax.HasValue)
+                    {
+                        if (!gameRamMax.HasValue || item.GameRamMax.Value > gameRamMax.Value)
+                            gameRamMax = item.GameRamMax.Value;
+                    }
+
+                    if (item.GameDurationMax.HasValue)
+                    {
+                        if (!gameDurationMax.HasValue || item.GameDurationMax.Value > gameDurationMax.Value)
+                            gameDurationMax = item.GameDurationMax.Value;
+                    }
+                }
+
+                string? primaryGame = null;
+                if (gameCounts != null && gameCounts.Count > 0)
+                {
+                    int maxCount = -1;
+                    foreach (var kvp in gameCounts)
+                    {
+                        if (kvp.Value > maxCount)
+                        {
+                            maxCount = kvp.Value;
+                            primaryGame = kvp.Key;
+                        }
+                    }
+                }
+
+                double cpuAvg = totalSamples > 0 ? cpuWeightedSum / totalSamples : 0;
+                double cpuP50 = itemCount > 0 ? cpuP50Sum / itemCount : 0;
+
+                double ramAvg = totalSamples > 0 ? ramWeightedSum / totalSamples : 0;
+                double ramP50 = itemCount > 0 ? ramP50Sum / itemCount : 0;
+
+                double? gameCpuAvg = gameCpuCount > 0 ? gameCpuSum / gameCpuCount : null;
+                double? gameRamAvg = gameRamCount > 0 ? gameRamSum / gameRamCount : null;
 
                 var agg = new TelemetryAggregateRecord
                 {
@@ -247,15 +382,15 @@ namespace Sayra.Backend.Application.Telemetry
                     CpuMax = cpuMax,
                     CpuAvg = cpuAvg,
                     CpuP50 = cpuP50,
-                    CpuP95 = cpuP95,
-                    CpuP99 = cpuP99,
+                    CpuP95 = cpuP95Max,
+                    CpuP99 = cpuP99Max,
 
                     RamMin = ramMin,
                     RamMax = ramMax,
                     RamAvg = ramAvg,
                     RamP50 = ramP50,
-                    RamP95 = ramP95,
-                    RamP99 = ramP99,
+                    RamP95 = ramP95Max,
+                    RamP99 = ramP99Max,
 
                     UptimeDelta = uptimeDelta,
                     LaunchesDelta = launchesDelta,

@@ -1,0 +1,3 @@
+## 2026-09-12 - Telemetry Aggregation Single-Pass Loop Optimization
+**Learning:** `TelemetryAggregationService` processing raw time-series metrics previously performed up to 10 LINQ query allocations per aggregate window (`Select`, `Where`, `GroupBy`, `OrderByDescending`, `Average`, `Max`, `Min`). Replacing these with a single-pass `for` loop over window-ordered records drastically reduces heap allocations and garbage collection pressure in background aggregation workers.
+**Action:** Always favor single-pass loops over chained LINQ projections for high-frequency telemetry/metric aggregation routines.
