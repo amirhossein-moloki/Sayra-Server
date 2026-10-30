@@ -1,0 +1,3 @@
+## 2026-09-12 - Single-pass loops vs LINQ in high-frequency background evaluators
+**Learning:** In periodic background workers (e.g., `WorkstationHealthEvaluationWorker`), calling LINQ extension methods like `FirstOrDefault(predicate)`, `Average(selector)`, and `Any(predicate)` across hundreds/thousands of workstations generates thousands of short-lived delegate closures and enumerator heap allocations per cycle.
+**Action:** In background worker evaluation paths and state machine evaluators, use single-pass indexed `for` loops to accumulate metrics, resolve severity, and lookup past state without delegate or enumerator allocations.
