@@ -86,8 +86,19 @@ namespace Sayra.Backend.Application.Telemetry
 
                     if (aggregates != null && aggregates.Count > 0)
                     {
-                        windowCpuAvg = aggregates.Average(a => a.CpuAvg);
-                        windowRamAvg = aggregates.Average(a => a.RamAvg);
+                        // Performance optimization: Single-pass zero-allocation average calculation
+                        // to eliminate LINQ delegate allocations (a => a.CpuAvg / RamAvg) and double list enumeration.
+                        double sumCpu = 0;
+                        double sumRam = 0;
+                        int aggregateCount = aggregates.Count;
+                        for (int i = 0; i < aggregateCount; i++)
+                        {
+                            var agg = aggregates[i];
+                            sumCpu += agg.CpuAvg;
+                            sumRam += agg.RamAvg;
+                        }
+                        windowCpuAvg = sumCpu / aggregateCount;
+                        windowRamAvg = sumRam / aggregateCount;
                     }
                 }
                 catch
@@ -272,38 +283,35 @@ namespace Sayra.Backend.Application.Telemetry
                 }
             }
 
-            // Compute Final Health State based on highest severity reason
+            // Compute Final Health State and Explainable Health Score (100.0 base)
+            // Performance optimization: Single-pass loop combining final state determination and score calculation
+            // to eliminate LINQ Any() delegate allocations and multiple list traversals.
             var finalState = WorkstationHealthState.Healthy;
-            if (reasons.Count > 0)
-            {
-                if (reasons.Any(r => r.Severity == WorkstationHealthState.Critical))
-                {
-                    finalState = WorkstationHealthState.Critical;
-                }
-                else if (reasons.Any(r => r.Severity == WorkstationHealthState.Degraded))
-                {
-                    finalState = WorkstationHealthState.Degraded;
-                }
-                else if (reasons.Any(r => r.Severity == WorkstationHealthState.Warning))
-                {
-                    finalState = WorkstationHealthState.Warning;
-                }
-            }
-
-            // Calculate Explainable Health Score (100.0 base)
             double score = 100.0;
-            foreach (var r in reasons)
+
+            int reasonCount = reasons.Count;
+            for (int i = 0; i < reasonCount; i++)
             {
+                var r = reasons[i];
                 switch (r.Severity)
                 {
                     case WorkstationHealthState.Critical:
                         score -= 40.0;
+                        finalState = WorkstationHealthState.Critical;
                         break;
                     case WorkstationHealthState.Degraded:
                         score -= 25.0;
+                        if (finalState != WorkstationHealthState.Critical)
+                        {
+                            finalState = WorkstationHealthState.Degraded;
+                        }
                         break;
                     case WorkstationHealthState.Warning:
                         score -= 10.0;
+                        if (finalState == WorkstationHealthState.Healthy)
+                        {
+                            finalState = WorkstationHealthState.Warning;
+                        }
                         break;
                 }
             }
@@ -323,8 +331,22 @@ namespace Sayra.Backend.Application.Telemetry
             WorkstationHealthEvaluationResult? previousResult,
             string reasonCode)
         {
-            if (previousResult?.Reasons == null) return null;
-            return previousResult.Reasons.FirstOrDefault(r => string.Equals(r.ReasonCode, reasonCode, StringComparison.OrdinalIgnoreCase));
+            var reasons = previousResult?.Reasons;
+            if (reasons == null) return null;
+
+            // Performance optimization: Indexed for-loop over IReadOnlyList to avoid
+            // LINQ FirstOrDefault delegate and enumerator heap allocations on hot evaluation paths.
+            int count = reasons.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var reason = reasons[i];
+                if (string.Equals(reason.ReasonCode, reasonCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return reason;
+                }
+            }
+
+            return null;
         }
     }
 }
